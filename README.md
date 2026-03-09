@@ -51,14 +51,12 @@ The agent uses **audio** (your voice) and **vision** (optional: screen/webcam) s
 ```
 Dasko/
 ├── README.md
-├── GETTING_STARTED.md
 ├── server.ts               # Node.js backend — Hono HTTP + WebSocket proxy to Gemini Live
 ├── package.json
-├── .env                    # GEMINI_API_KEY (never commit)
+├── .env.example            # Copy to .env and add your API key
 ├── frontend/
 │   ├── index.html          # Teacher UI: topic picker, mic controls, transcript
 │   └── app.js              # Mic capture, PCM streaming, audio playback
-├── backend/                # Legacy Python backend (not used)
 └── docs/
 ```
 
@@ -85,9 +83,9 @@ Dasko/
 
 ## Running locally
 
-1. Add your API key to `.env`:
-   ```
-   GEMINI_API_KEY=your_key_here
+1. Copy `.env.example` to `.env` and add your API key:
+   ```bash
+   cp .env.example .env
    ```
    Get one at [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey).
 
@@ -115,7 +113,7 @@ Dasko/
 - **Model never replies / session closes immediately** — Check the terminal for the close code. Code `1008` means the model name is wrong or not available for your API key. The correct model is `gemini-2.5-flash-native-audio-latest`.
 - **Student audio not playing** — Ensure the browser tab is not muted. Check the browser console (F12) for Web Audio errors. The playback AudioContext is created on the “Start teaching” click to satisfy browser autoplay policy.
 - **Mic toggles on/off** — Never mix `sendClientContent` and `sendRealtimeInput` in the same session. Use `sendRealtimeInput({ text: “...” })` for any text triggers in audio sessions.
-- **Port 8000 already in use** — A previous server process is still running. Find and kill it: `lsof -i :8000` then `kill <PID>`.
+- **Port 8000 already in use** — `npm run dev` handles this automatically. If it still fails, run `lsof -ti:8000 | xargs kill -9` manually.
 
 ---
 

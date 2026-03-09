@@ -4,7 +4,8 @@
   "description": "Learn by teaching — AI students powered by Gemini Live",
   "main": "server.ts",
   "scripts": {
-    "dev": "tsx --watch --env-file=.env server.ts"
+    "dev": "tsx --watch --env-file=.env server.ts",
+    "predev": "lsof -ti:8000 | xargs kill -9 2>/dev/null || true"
   },
   "dependencies": {
     "@google/genai": "^1.30.0",

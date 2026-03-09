@@ -94,7 +94,7 @@ async function main() {
       systemInstruction: getStudentInstruction(topic),
     };
 
-    let session: Awaited<ReturnType<typeof ai.live.connect>>;
+    let session!: Awaited<ReturnType<typeof ai.live.connect>>;
 
     try {
       session = await ai.live.connect({
