@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dasko — Learn by teaching</title>
+  <style>
+    :root {
+      --bg: #0f0f12;
+      --surface: #1a1a1f;
+      --border: #2a2a32;
+      --text: #e8e6e3;
+      --muted: #888;
+      --accent: #6c9eff;
+      --accent-hover: #8bb3ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .tagline { color: var(--muted); margin-bottom: 2rem; font-size: 0.95rem; }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      max-width: 420px;
+      width: 100%;
+    }
+    label { display: block; margin-bottom: 0.5rem; font-size: 0.9rem; color: var(--muted); }
+    select, input[type="text"] {
+      width: 100%;
+      padding: 0.6rem 0.8rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 1rem;
+      margin-bottom: 1rem;
+    }
+    button {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { background: var(--accent-hover); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .status {
+      margin-top: 1rem;
+      padding: 0.75rem;
+      background: var(--bg);
+      border-radius: 8px;
+      font-size: 0.85rem;
+      color: var(--muted);
+      min-height: 2.5rem;
+    }
+    .status.connected { color: var(--accent); }
+    .status.error { color: #e06c75; }
+    .transcript {
+      margin-top: 1rem;
+      padding: 0.75rem;
+      background: var(--bg);
+      border-radius: 8px;
+      font-size: 0.85rem;
+      color: var(--muted);
+      max-height: 8rem;
+      overflow-y: auto;
+    }
+    .transcript .student-line { margin: 0.25rem 0; }
+  </style>
+</head>
+<body>
+  <h1>Dasko</h1>
+  <p class="tagline">Learn by teaching — your AI student is listening.</p>
+
+  <div class="card">
+    <label for="topic">Topic you’re teaching</label>
+    <select id="topic">
+      <option value="">Loading…</option>
+    </select>
+    <label for="customTopic">Or type your own topic</label>
+    <input type="text" id="customTopic" placeholder="e.g. How vaccines work" />
+
+    <button id="startBtn" type="button">Start teaching</button>
+    <button id="stopBtn" type="button" style="display: none; margin-top: 0.5rem; background: var(--surface); color: var(--text); border: 1px solid var(--border);">End session</button>
+    <button id="muteBtn" type="button" style="display: none; margin-top: 0.5rem; background: var(--surface); color: var(--text); border: 1px solid var(--border);">Mute mic</button>
+    <button id="doneSpeakingBtn" type="button" style="display: none; margin-top: 0.5rem; background: var(--surface); color: var(--text); border: 1px solid var(--border);">Done speaking (if they don’t respond automatically)</button>
+
+    <div id="status" class="status">Choose a topic and start. Mic and Live API will connect when you start.</div>
+    <div id="transcript" class="transcript" aria-live="polite"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
