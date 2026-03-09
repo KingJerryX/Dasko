@@ -37,85 +37,85 @@ The agent uses **audio** (your voice) and **vision** (optional: screen/webcam) s
 
 ---
 
-## Tech stack (target)
+## Tech stack
 
-- **Backend**: Python (FastAPI or similar) — WebSocket proxy to Gemini Live API, session and topic handling.
-- **Frontend**: Web app — mic/speaker, optional screen share or webcam, simple “Choose topic → Start teaching” flow.
-- **API**: [Gemini Live API](https://ai.google.dev/gemini-api/docs/live) (Vertex AI or Google AI) — stateful WebSocket, system instructions for “student” persona, native audio I/O.
-- **Hosting**: Google Cloud (e.g. Cloud Run, or required challenge hosting).
+- **Backend**: Node.js + TypeScript (Hono + `ws`) — WebSocket proxy to Gemini Live API, per-client sessions, topic handling.
+- **Frontend**: Vanilla JS web app — mic capture, audio playback, topic selection, transcript display.
+- **Model**: `gemini-2.5-flash-native-audio-latest` via Google AI Studio API key.
+- **Hosting**: Google Cloud (Cloud Run).
 
 ---
 
-## Project structure (planned)
+## Project structure
 
 ```
 Dasko/
-├── README.md                 # This file
-├── GETTING_STARTED.md        # Step-by-step: GCP, Live API, first run
-├── backend/                  # Python WebSocket proxy + HTTP API
-│   ├── server.py
-│   ├── live_session.py       # Gemini Live session + system instructions
-│   └── requirements.txt
-├── frontend/                 # Web UI (teacher experience)
-│   ├── index.html
-│   ├── app.js                # Mic, playback, optional video
-│   └── live-client.js        # WebSocket to backend → Live API
-└── docs/                     # Design notes, prompts, challenge checklist
+├── README.md
+├── GETTING_STARTED.md
+├── server.ts               # Node.js backend — Hono HTTP + WebSocket proxy to Gemini Live
+├── package.json
+├── .env                    # GEMINI_API_KEY (never commit)
+├── frontend/
+│   ├── index.html          # Teacher UI: topic picker, mic controls, transcript
+│   └── app.js              # Mic capture, PCM streaming, audio playback
+├── backend/                # Legacy Python backend (not used)
+└── docs/
 ```
 
 ---
 
 ## Roadmap
 
-1. **Phase 1 — Minimum viable**  
-   - [ ] GCP project + Vertex AI (or Google AI) + Live API enabled  
-   - [ ] Backend: WebSocket proxy to Gemini Live with a fixed “student” system instruction  
-   - [ ] Frontend: push-to-talk or always-on mic, play agent audio, no video yet  
-   - [ ] User chooses a topic (e.g. from a list); system instruction includes “You are a student learning [topic]…”
+1. **Phase 1 — Minimum viable** ✅
+   - [x] Node.js WebSocket proxy to Gemini Live with student system instruction
+   - [x] Frontend: always-on mic, play student audio, topic selection
+   - [x] User chooses a topic; system instruction scopes the student to that topic
+   - [x] Student greets first, then listens and asks questions
 
-2. **Phase 2 — Vision**  
-   - [ ] Send video (e.g. 1 FPS JPEG) from frontend to Live API so the “student” can reference what’s on screen  
-   - [ ] Optional webcam or screen share so the agent can “see” the teacher
+2. **Phase 2 — Vision**
+   - [ ] Send video (1 FPS JPEG) from frontend so the student can reference the screen
+   - [ ] Optional webcam or screen share
 
-3. **Phase 3 — Polish & challenge**  
-   - [ ] Topic presets and custom topic input  
-   - [ ] Session history / replay (if allowed by API)  
-   - [ ] Deploy on Google Cloud per challenge rules  
+3. **Phase 3 — Polish & challenge**
+   - [ ] Session history / transcript export
+   - [ ] Deploy on Google Cloud per challenge rules
    - [ ] Demo script and submission
 
 ---
 
-## Plug in your API key (do not paste it in chat)
+## Running locally
 
-1. **Copy** `backend/.env.example` to `backend/.env`.
-2. **Edit** `backend/.env`: set `GEMINI_API_KEY=your_key` (from [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)) **or** set `GOOGLE_CLOUD_PROJECT` and use `gcloud auth application-default login` for Vertex.
-3. **Run** the backend (use a venv if your system Python is externally managed):
-   ```bash
-   cd backend
-   python3 -m venv .venv && source .venv/bin/activate   # or: .venv\Scripts\activate on Windows
-   pip install -r requirements.txt
-   uvicorn server:app --reload
+1. Add your API key to `.env`:
    ```
-   Then open http://127.0.0.1:8000.
+   GEMINI_API_KEY=your_key_here
+   ```
+   Get one at [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey).
 
-See **[GETTING_STARTED.md](./GETTING_STARTED.md)** for:
+2. Install and run:
+   ```bash
+   npm install
+   npm run dev
+   ```
 
-- Google Cloud / Vertex AI setup  
-- Enabling the Live API and getting credentials  
-- Running the backend and frontend locally  
-- Configuring the “student” system instruction for Dasko  
+3. Open [http://localhost:8000](http://localhost:8000), pick a topic, and click **Start teaching**.
 
-**Voice flow:** Mic audio is streamed to the Live API as raw 16 kHz PCM via `send_realtime_input`; the API handles turn-taking (VAD). With an **API key**, the app uses proactive audio so the student can greet first; with **Vertex**, an initial text turn triggers the greeting. Student replies are streamed back as audio and played in the browser. Config follows the [Gemini cookbook Live API quickstart](https://github.com/google-gemini/cookbook/blob/main/quickstarts/Get_started_LiveAPI.py) (speech_config with Zephyr voice, context_window_compression). **Tip:** If voice isn’t working, try the API key path first (set `GEMINI_API_KEY` in `.env`, leave `GOOGLE_CLOUD_PROJECT` unset).
+---
+
+## How it works
+
+- Browser captures mic audio as 16-bit PCM at 16 kHz and streams it as binary WebSocket frames to the server.
+- Server forwards audio to the Gemini Live API via `sendRealtimeInput`. The API handles VAD (voice activity detection) — no push-to-talk needed.
+- On connect, the server triggers the student’s greeting via `sendRealtimeInput({ text: “...” })` (same mode as mic audio — mixing `sendClientContent` and `sendRealtimeInput` in one session causes issues).
+- Student audio responses stream back as base64 PCM at 24 kHz and are played in the browser via the Web Audio API.
 
 ---
 
 ## Troubleshooting
 
-- **Model never replies** — Check the terminal when you start a session: it logs `Live session: Vertex AI` or `Live session: Google AI (API key)`. Try the other backend (see "Switching API key vs Vertex" below); one may work when the other does not.
-- **Student audio not playing** — The backend receives and forwards audio from the Live API; playback is in the browser. If you see “Playing student audio…” but hear nothing: ensure the browser tab is not muted (right‑click tab → Unmute site), system volume is up, and try another browser or device. The app uses the Web Audio API and sends audio as JSON+base64; if you see “Playback error: …” in the status bar, check the browser console (F12) for details.
-- **Session ends immediately / 1007 errors** — Use the correct auth for your setup: API key only (no Vertex env vars) for Google AI Studio; for Vertex, set `GOOGLE_CLOUD_PROJECT` and leave `GEMINI_API_KEY` empty, then run `gcloud auth application-default login`. See `docs/VERTEX_AI_SETUP.md` for Vertex steps.
-
-**Switching API key vs Vertex:** When you start a session, the terminal logs `Live session: Vertex AI, model=...` or `Live session: Google AI (API key), model=...`. To use **API key**: set `GEMINI_API_KEY=your_key` in `backend/.env` and remove or comment out `GOOGLE_CLOUD_PROJECT`. To use **Vertex**: leave `GEMINI_API_KEY` empty, set `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`, run `gcloud auth application-default login`, restart backend. If the model replies on one but not the other, use the one that works.
+- **Model never replies / session closes immediately** — Check the terminal for the close code. Code `1008` means the model name is wrong or not available for your API key. The correct model is `gemini-2.5-flash-native-audio-latest`.
+- **Student audio not playing** — Ensure the browser tab is not muted. Check the browser console (F12) for Web Audio errors. The playback AudioContext is created on the “Start teaching” click to satisfy browser autoplay policy.
+- **Mic toggles on/off** — Never mix `sendClientContent` and `sendRealtimeInput` in the same session. Use `sendRealtimeInput({ text: “...” })` for any text triggers in audio sessions.
+- **Port 8000 already in use** — A previous server process is still running. Find and kill it: `lsof -i :8000` then `kill <PID>`.
 
 ---
 
