@@ -222,7 +222,7 @@ async function main() {
     return c.json({ topics: TOPICS });
   });
 
-  const port = 8000;
+  const port = Number(process.env.PORT) || 8000;
   const server = serve({ fetch: app.fetch, port });
 
   const wss = new WebSocketServer({ server });

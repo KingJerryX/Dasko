@@ -76,7 +76,7 @@ Dasko/
 
 3. **Phase 3 — Polish & challenge**
    - [ ] Session history / transcript export
-   - [ ] Deploy on Google Cloud per challenge rules
+   - [ ] Deploy on Google Cloud per challenge rules → see **[docs/DEPLOY_GOOGLE_CLOUD.md](docs/DEPLOY_GOOGLE_CLOUD.md)**
    - [ ] Demo script and submission
 
 ---

@@ -49,8 +49,116 @@ let classroomMode    = false;
 let selectedPersona  = "eager";
 let selectedStudents = new Set();
 
+// ── Startup tone & button sounds (shared AudioContext) ──
+let _startupAudioContext = null;
+let _startupTonePlayed = false;
+
+function getAudioContext() {
+  if (!_startupAudioContext) _startupAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+  return _startupAudioContext;
+}
+
+function playStartupTone() {
+  if (_startupTonePlayed) return;
+  const ctx = getAudioContext();
+  const run = () => {
+    if (_startupTonePlayed) return;
+    try {
+      if (ctx.state !== "running") return;
+      _startupTonePlayed = true;
+      const duration = 1.7;
+      const baseFreq = 196;
+      const gainNode = ctx.createGain();
+      gainNode.gain.setValueAtTime(0, ctx.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.38, ctx.currentTime + 0.04);
+      gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+      gainNode.connect(ctx.destination);
+
+      const o1 = ctx.createOscillator();
+      o1.type = "sine";
+      o1.frequency.setValueAtTime(baseFreq, ctx.currentTime);
+      o1.frequency.linearRampToValueAtTime(baseFreq * 1.02, ctx.currentTime + duration * 0.5);
+      o1.connect(gainNode);
+      o1.start(ctx.currentTime);
+      o1.stop(ctx.currentTime + duration);
+
+      const o2 = ctx.createOscillator();
+      o2.type = "sine";
+      o2.frequency.setValueAtTime(baseFreq * 1.006, ctx.currentTime);
+      o2.frequency.linearRampToValueAtTime(baseFreq * 1.024, ctx.currentTime + duration * 0.5);
+      o2.connect(gainNode);
+      o2.start(ctx.currentTime);
+      o2.stop(ctx.currentTime + duration);
+
+      const o3 = ctx.createOscillator();
+      o3.type = "sine";
+      o3.frequency.setValueAtTime(baseFreq * 2.48, ctx.currentTime);
+      const g3 = ctx.createGain();
+      g3.gain.setValueAtTime(0.22, ctx.currentTime);
+      g3.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration * 0.6);
+      o3.connect(g3);
+      g3.connect(gainNode);
+      o3.start(ctx.currentTime);
+      o3.stop(ctx.currentTime + duration);
+    } catch (_) {}
+  };
+  if (ctx.state === "suspended") ctx.resume().then(run).catch(() => {});
+  else run();
+}
+
+function playButtonSound(type) {
+  try {
+    const ctx = getAudioContext();
+    if (ctx.state === "suspended") return;
+    const t = ctx.currentTime;
+    const gainNode = ctx.createGain();
+    gainNode.connect(ctx.destination);
+    if (type === "confirm") {
+      gainNode.gain.setValueAtTime(0, t);
+      gainNode.gain.linearRampToValueAtTime(0.2, t + 0.02);
+      gainNode.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+      const o1 = ctx.createOscillator();
+      o1.type = "sine";
+      o1.frequency.setValueAtTime(320, t);
+      o1.frequency.linearRampToValueAtTime(400, t + 0.12);
+      o1.connect(gainNode);
+      o1.start(t);
+      o1.stop(t + 0.28);
+      const o2 = ctx.createOscillator();
+      o2.type = "sine";
+      o2.frequency.setValueAtTime(324, t);
+      o2.frequency.linearRampToValueAtTime(404, t + 0.12);
+      o2.connect(gainNode);
+      o2.start(t);
+      o2.stop(t + 0.28);
+    } else {
+      gainNode.gain.setValueAtTime(0, t);
+      gainNode.gain.linearRampToValueAtTime(0.15, t + 0.015);
+      gainNode.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+      const o = ctx.createOscillator();
+      o.type = "sine";
+      o.frequency.setValueAtTime(220, t);
+      o.frequency.exponentialRampToValueAtTime(180, t + 0.22);
+      o.connect(gainNode);
+      o.start(t);
+      o.stop(t + 0.22);
+    }
+  } catch (_) {}
+}
+
+function onFirstInteraction() {
+  if (_startupTonePlayed) return;
+  playStartupTone();
+}
+
+// Browsers block audio until the user interacts. First tap/click/key anywhere on the page plays the startup tone.
+["click", "touchstart", "keydown"].forEach((ev) => {
+  document.addEventListener(ev, onFirstInteraction, { once: true, capture: true });
+});
+
 // ── Landing → Setup ────────────────────────────────────────────────────────────
 getStartedBtn.addEventListener("click", () => {
+  playButtonSound("confirm");
   landingScreen.classList.add("fade-out");
   setTimeout(() => {
     landingScreen.style.display = "none";
@@ -550,12 +658,17 @@ async function connect() {
 startBtn.addEventListener("click", async () => {
   if (classroomMode && selectedStudents.size < 2) { setStatus("Select at least 2 students.", "error"); return; }
   if (!getSelectedTopic()) { setStatus("Pick a topic first.", "error"); return; }
+  playButtonSound("confirm");
   startBtn.disabled = true;
   await connect();
   startBtn.disabled = false;
 });
 
-stopBtn.addEventListener("click", () => { lastError = null; disconnect(); });
+stopBtn.addEventListener("click", () => {
+  playButtonSound("end");
+  lastError = null;
+  disconnect();
+});
 
 muteBtn.addEventListener("click", () => {
   micMuted = !micMuted;
