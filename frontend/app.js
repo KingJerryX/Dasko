@@ -1,31 +1,86 @@
 /**
- * Dasko — mic capture, WebSocket proxy, audio playback, orb state engine.
- * Live API: send 16-bit PCM 16 kHz mono; receive 16-bit PCM 24 kHz mono.
+ * Dasko — mic/camera capture, WebSocket proxy, audio playback, orb state engine.
  */
 
-// ── DOM refs ──────────────────────────────────────────────────────────────────
-const setupScreen     = document.getElementById("setup-screen");
-const sessionScreen   = document.getElementById("session-screen");
-const topicSelect     = document.getElementById("topic");
-const customTopic     = document.getElementById("customTopic");
-const startBtn        = document.getElementById("startBtn");
-const stopBtn         = document.getElementById("stopBtn");
-const muteBtn         = document.getElementById("muteBtn");
-const doneSpeakingBtn = document.getElementById("doneSpeakingBtn");
-const statusEl        = document.getElementById("status");
+// ── DOM refs ───────────────────────────────────────────────────────────────────
+const landingScreen     = document.getElementById("landing-screen");
+const setupScreen       = document.getElementById("setup-screen");
+const sessionScreen     = document.getElementById("session-screen");
+const getStartedBtn     = document.getElementById("getStartedBtn");
+const topicSelect       = document.getElementById("topic");
+const customTopic       = document.getElementById("customTopic");
+const materialsEl       = document.getElementById("materials");
+const useCameraEl       = document.getElementById("useCamera");
+const startBtn          = document.getElementById("startBtn");
+const stopBtn           = document.getElementById("stopBtn");
+const muteBtn           = document.getElementById("muteBtn");
+const doneSpeakingBtn   = document.getElementById("doneSpeakingBtn");
+const statusEl          = document.getElementById("status");
 const sessionTopicLabel = document.getElementById("sessionTopicLabel");
+const modeTabSolo       = document.getElementById("modeTabSolo");
+const modeTabClassroom  = document.getElementById("modeTabClassroom");
+const soloSection       = document.getElementById("soloSection");
+const classroomSection  = document.getElementById("classroomSection");
+const studentHint       = document.getElementById("studentHint");
+const orb               = document.getElementById("orb");
+const orbWrap           = document.getElementById("orbWrap");
+const orbLabel          = document.getElementById("orbLabel");
+const speakerLabel      = document.getElementById("speakerLabel");
+const orbPillDot        = document.getElementById("orbPillDot");
+const orbPillLabel      = document.getElementById("orbPillLabel");
+const micDot            = document.getElementById("micDot");
+const micLabel          = document.getElementById("micLabel");
+const chatInput         = document.getElementById("chatInput");
+const chatSendBtn       = document.getElementById("chatSendBtn");
+const cameraFeed        = document.getElementById("cameraFeed");
 
-// Orb
-const orb      = document.getElementById("orb");
-const orbWrap  = document.getElementById("orbWrap");
-const orbLabel = document.getElementById("orbLabel");
+// ── Student roster ─────────────────────────────────────────────────────────────
+const STUDENTS = {
+  emma:   { name: "Emma",   color: "#93C5FD", glow: "rgba(147,197,253,0.5)" },
+  marcus: { name: "Marcus", color: "#FDA4AF", glow: "rgba(253,164,175,0.5)" },
+  lily:   { name: "Lily",   color: "#C4B5FD", glow: "rgba(196,181,253,0.5)" },
+  priya:  { name: "Priya",  color: "#6EE7B7", glow: "rgba(110,231,183,0.5)" },
+  tyler:  { name: "Tyler",  color: "#D1D5DB", glow: "rgba(209,213,219,0.5)" },
+  zoe:    { name: "Zoe",    color: "#FBBF24", glow: "rgba(251,191,36,0.5)"  },
+};
 
-// Mic indicator
-const micDot   = document.getElementById("micDot");
-const micLabel = document.getElementById("micLabel");
+// ── Mode & selection state ─────────────────────────────────────────────────────
+let classroomMode    = false;
+let selectedPersona  = "eager";
+let selectedStudents = new Set();
 
-// ── Persona selection ─────────────────────────────────────────────────────────
-let selectedPersona = "eager";
+// ── Landing → Setup ────────────────────────────────────────────────────────────
+getStartedBtn.addEventListener("click", () => {
+  landingScreen.classList.add("fade-out");
+  setTimeout(() => {
+    landingScreen.style.display = "none";
+    landingScreen.classList.remove("fade-out");
+    setupScreen.style.display = "flex";
+    setupScreen.classList.add("fade-in");
+    setTimeout(() => setupScreen.classList.remove("fade-in"), 300);
+  }, 280);
+});
+
+// ── Mode tabs ──────────────────────────────────────────────────────────────────
+modeTabSolo.addEventListener("click", () => {
+  classroomMode = false;
+  modeTabSolo.classList.add("active");
+  modeTabClassroom.classList.remove("active");
+  soloSection.style.display = "block";
+  classroomSection.style.display = "none";
+  updateStartButton();
+});
+
+modeTabClassroom.addEventListener("click", () => {
+  classroomMode = true;
+  modeTabClassroom.classList.add("active");
+  modeTabSolo.classList.remove("active");
+  soloSection.style.display = "none";
+  classroomSection.style.display = "block";
+  updateStartButton();
+});
+
+// ── Persona selection (solo) ───────────────────────────────────────────────────
 document.querySelectorAll(".persona-card").forEach(card => {
   card.addEventListener("click", () => {
     document.querySelectorAll(".persona-card").forEach(c => c.classList.remove("selected"));
@@ -34,7 +89,38 @@ document.querySelectorAll(".persona-card").forEach(card => {
   });
 });
 
-// ── Topic loading ─────────────────────────────────────────────────────────────
+// ── Student selection (classroom) ──────────────────────────────────────────────
+document.querySelectorAll(".student-card").forEach(card => {
+  card.addEventListener("click", () => {
+    const id    = card.dataset.student;
+    const color = card.dataset.color;
+    if (selectedStudents.has(id)) {
+      selectedStudents.delete(id);
+      card.classList.remove("selected");
+      card.style.borderColor = "";
+    } else if (selectedStudents.size < 4) {
+      selectedStudents.add(id);
+      card.classList.add("selected");
+      card.style.borderColor = color;
+    }
+    updateStartButton();
+  });
+});
+
+function updateStartButton() {
+  if (!classroomMode) {
+    startBtn.disabled = false;
+    startBtn.textContent = "Start teaching";
+    return;
+  }
+  const n = selectedStudents.size;
+  startBtn.disabled = n < 2;
+  if      (n === 0) { startBtn.textContent = "Select 2–4 students";       studentHint.textContent = "Select 2–4"; }
+  else if (n === 1) { startBtn.textContent = "Select 1 more student";      studentHint.textContent = "1 selected — need 1 more"; }
+  else              { startBtn.textContent = `Start teaching (${n} students)`; studentHint.textContent = `${n} selected`; }
+}
+
+// ── Topic loading ──────────────────────────────────────────────────────────────
 function escapeHtml(s) {
   const d = document.createElement("div");
   d.textContent = s;
@@ -57,133 +143,146 @@ function getSelectedTopic() {
   return customTopic.value.trim() || topicSelect.value || "the topic the teacher will explain";
 }
 
-// ── Orb state machine ─────────────────────────────────────────────────────────
-//
-// Each state sets CSS custom properties on the orb + optional ripple rings.
-// Transitions between colors/glow are handled by CSS `transition`.
-//
+// ── Orb state machine ──────────────────────────────────────────────────────────
 const ORB_STATES = {
-  idle: {
-    color: "#EBEBEB",
-    glow:  "rgba(235,235,235,0.5)",
-    speed: "3.5s",
-    rings: false,
-    label: "",
-  },
-  listening: {          // student attentive, teacher's turn
-    color: "#93C5FD",
-    glow:  "rgba(147,197,253,0.45)",
-    speed: "2.2s",
-    rings: false,
-    label: "Listening…",
-  },
-  thinking: {           // teacher stopped, model processing
-    color: "#C4B5FD",
-    glow:  "rgba(196,181,253,0.5)",
-    speed: "2.6s",
-    rings: false,
-    label: "Thinking…",
-  },
-  speaking: {           // student audio is playing
-    color: "#FF7355",
-    glow:  "rgba(255,115,85,0.5)",
-    speed: "0.85s",
-    rings: true,
-    label: "Speaking…",
-  },
-  curious: {
-    color: "#FBBF24",
-    glow:  "rgba(251,191,36,0.45)",
-    speed: "1.6s",
-    rings: false,
-    label: "Curious!",
-  },
-  confused: {
-    color: "#FDA4AF",
-    glow:  "rgba(253,164,175,0.45)",
-    speed: "2.9s",
-    rings: false,
-    label: "Hmm…",
-  },
-  excited: {
-    color: "#FF7355",
-    glow:  "rgba(255,115,85,0.65)",
-    speed: "0.65s",
-    rings: true,
-    label: "Excited!",
-  },
+  idle:      { color: "#EBEBEB", glow: "rgba(235,235,235,0.5)",  speed: "3.5s",  rings: false, label: "" },
+  listening: { color: "#93C5FD", glow: "rgba(147,197,253,0.45)", speed: "2.2s",  rings: false, label: "Listening…" },
+  thinking:  { color: "#C4B5FD", glow: "rgba(196,181,253,0.5)",  speed: "2.6s",  rings: false, label: "Thinking…" },
+  speaking:  { color: "#FF7355", glow: "rgba(255,115,85,0.5)",   speed: "0.85s", rings: true,  label: "Speaking…" },
+  curious:   { color: "#FBBF24", glow: "rgba(251,191,36,0.45)",  speed: "1.6s",  rings: false, label: "Curious!" },
+  confused:  { color: "#FDA4AF", glow: "rgba(253,164,175,0.45)", speed: "2.9s",  rings: false, label: "Hmm…" },
+  excited:   { color: "#FF7355", glow: "rgba(255,115,85,0.65)",  speed: "0.65s", rings: true,  label: "Excited!" },
 };
 
 let currentOrbState = "idle";
+
+function applyOrbColor(color, glow) {
+  orb.style.setProperty("--orb-color", color);
+  orb.style.setProperty("--orb-glow",  glow);
+  orbWrap.style.setProperty("--orb-color", color);
+  orbPillDot.style.setProperty("--orb-color", color);
+  orbPillDot.style.setProperty("--orb-glow",  glow);
+}
 
 function setOrbState(name) {
   if (name === currentOrbState) return;
   currentOrbState = name;
   const s = ORB_STATES[name] || ORB_STATES.idle;
 
-  orb.style.setProperty("--orb-color", s.color);
-  orb.style.setProperty("--orb-glow",  s.glow);
-  orb.style.setProperty("--orb-speed", s.speed);
-  // Ripple rings need the color too
-  orbWrap.style.setProperty("--orb-color", s.color);
+  // In classroom mode only apply color on idle — student color owns it otherwise
+  if (!classroomMode || name === "idle") applyOrbColor(s.color, s.glow);
 
-  // Restart animation so speed change kicks in immediately
+  orb.style.setProperty("--orb-speed", s.speed);
+  orbPillDot.style.setProperty("--orb-speed", s.speed);
   orb.style.animation = "none";
   void orb.offsetWidth;
   orb.style.animation = "";
 
   orbWrap.classList.toggle("rings-on", s.rings);
-  orbLabel.textContent = s.label;
+  orbLabel.textContent    = s.label;
+  orbPillLabel.textContent = s.label;
 }
 
-// Detect an orb state from the student's transcript text
-function stateFromTranscript(text) {
-  const t = text.toLowerCase();
-  if (/don'?t (get|understand)|confused|lost|unclear|not following|repeat that|huh\?/.test(t))
-    return "confused";
-  if (/wow|amazing|love (it|that)|brilliant|awesome|perfect|exactly right/.test(t))
-    return "excited";
-  if (/(why|how|what|when|where)\s+.{0,30}\?/.test(t) || (t.match(/\?/g) || []).length >= 2)
-    return "curious";
-  return null;
+function setSpeaker(name) {
+  const student = STUDENTS[name.toLowerCase()];
+  if (!student) return;
+  applyOrbColor(student.color, student.glow);
+  speakerLabel.textContent = student.name;
+  speakerLabel.style.color = student.color;
 }
 
-// ── Mic indicator ─────────────────────────────────────────────────────────────
+// ── Classroom orb management ───────────────────────────────────────────────────
+function createClassroomOrbs() {
+  const container = document.getElementById("classroomOrbs");
+  container.innerHTML = "";
+  for (const id of selectedStudents) {
+    const s = STUDENTS[id];
+    const wrap = document.createElement("div");
+    wrap.className = "student-orb-wrap";
+    wrap.id = `orb-wrap-${id}`;
+    wrap.innerHTML = `
+      <div class="student-orb-rings" id="orb-rings-${id}" style="--s-color:${s.color}">
+        <div class="s-ring"></div><div class="s-ring"></div><div class="s-ring"></div>
+      </div>
+      <div class="student-orb-circle idle" id="orb-circle-${id}" style="--s-color:${s.color};--s-glow:${s.glow}"></div>
+      <div class="student-orb-name idle" id="orb-name-${id}" style="color:${s.color}">${s.name}</div>
+    `;
+    container.appendChild(wrap);
+  }
+}
+
+function activateStudentOrb(id) {
+  for (const sid of selectedStudents) {
+    const circle = document.getElementById(`orb-circle-${sid}`);
+    const name   = document.getElementById(`orb-name-${sid}`);
+    const rings  = document.getElementById(`orb-rings-${sid}`);
+    if (!circle) continue;
+    if (sid === id) {
+      circle.classList.remove("idle"); circle.classList.add("speaking");
+      name.classList.remove("idle");   name.classList.add("speaking");
+      rings.classList.add("speaking");
+    } else {
+      circle.classList.remove("speaking"); circle.classList.add("idle");
+      name.classList.remove("speaking");   name.classList.add("idle");
+      rings.classList.remove("speaking");
+    }
+  }
+}
+
+function deactivateStudentOrb(id) {
+  const circle = document.getElementById(`orb-circle-${id}`);
+  const name   = document.getElementById(`orb-name-${id}`);
+  const rings  = document.getElementById(`orb-rings-${id}`);
+  if (!circle) return;
+  circle.classList.remove("speaking"); circle.classList.add("idle");
+  name.classList.remove("speaking");   name.classList.add("idle");
+  rings.classList.remove("speaking");
+}
+
+const SERVER_EMOTION_STATES = new Set(["curious", "confused", "excited", "listening", "thinking"]);
+
+// ── Mic indicator ──────────────────────────────────────────────────────────────
 function setMicActive(active) {
   micDot.classList.toggle("active", active);
   micLabel.classList.toggle("active", active);
   micLabel.textContent = active ? "mic on" : "mic off";
 }
 
-// ── Status ────────────────────────────────────────────────────────────────────
+// ── Status ─────────────────────────────────────────────────────────────────────
 function setStatus(msg, type = "") {
   statusEl.textContent = msg;
   statusEl.className   = type;
 }
 
-// ── Audio / WebSocket state ───────────────────────────────────────────────────
-let ws               = null;
-let lastError        = null;
-let micStream        = null;
-let micContext       = null;
-let micProcessor     = null;
-let micMuted         = false;
-let playbackContext  = null;
-let playbackGainNode = null;
-let nextPlayTime     = 0;
+// ── Audio / WebSocket state ────────────────────────────────────────────────────
+let ws                = null;
+let lastError         = null;
+let micStream         = null;
+let micContext        = null;
+let micProcessor      = null;
+let micMuted          = false;
+let playbackContext   = null;
+let playbackGainNode  = null;
+let nextPlayTime      = 0;
 let audioChunksReceived = 0;
 
-const SEND_SAMPLE_RATE = 16000;
-const RECV_SAMPLE_RATE = 24000;
-const BUFFER_SIZE      = 2048;
-// 2048 samples @ 16 kHz ≈ 128 ms/buffer; 18 buffers ≈ 2.3 s silence before speech_end
+const SEND_SAMPLE_RATE           = 16000;
+const RECV_SAMPLE_RATE           = 24000;
+const BUFFER_SIZE                = 2048;
 const SILENCE_BUFFERS_BEFORE_END = 18;
-const SPEECH_ENERGY_THRESHOLD   = 0.006;
+const SPEECH_ENERGY_THRESHOLD    = 0.006;
 
 let vadInSpeech    = false;
 let vadSilenceCount = 0;
 
-// ── PCM helpers ───────────────────────────────────────────────────────────────
+// ── Camera / video state ───────────────────────────────────────────────────────
+let cameraStream  = null;
+let frameInterval = null;
+const frameCanvas = document.createElement("canvas");
+frameCanvas.width  = 640;
+frameCanvas.height = 360;
+
+// ── PCM helpers ────────────────────────────────────────────────────────────────
 function float32ToPcm16(f32) {
   const pcm = new Int16Array(f32.length);
   for (let i = 0; i < f32.length; i++) {
@@ -200,9 +299,29 @@ function pcm16ToFloat32(pcm16) {
   return f32;
 }
 
-// ── Mic capture ───────────────────────────────────────────────────────────────
-async function startMic() {
-  micStream  = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+// ── Camera capture ─────────────────────────────────────────────────────────────
+async function startCamera() {
+  cameraStream = await navigator.mediaDevices.getUserMedia({
+    video: { width: 640, height: 360, frameRate: 30 },
+    audio: true,
+  });
+  cameraFeed.srcObject = cameraStream;
+  await cameraFeed.play().catch(() => {});
+
+  const ctx = frameCanvas.getContext("2d");
+  frameInterval = setInterval(() => {
+    if (!ws || ws.readyState !== WebSocket.OPEN || micMuted) return;
+    ctx.drawImage(cameraFeed, 0, 0, frameCanvas.width, frameCanvas.height);
+    const base64 = frameCanvas.toDataURL("image/jpeg", 0.7).split(",")[1];
+    try { ws.send(JSON.stringify({ type: "video_frame", base64 })); } catch (_) {}
+  }, 1000);
+
+  return cameraStream;
+}
+
+// ── Mic capture ────────────────────────────────────────────────────────────────
+async function startMic(existingStream = null) {
+  micStream  = existingStream || await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
   micContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SEND_SAMPLE_RATE });
   const source = micContext.createMediaStreamSource(micStream);
 
@@ -217,7 +336,6 @@ async function startMic() {
     if (rms > SPEECH_ENERGY_THRESHOLD) {
       if (!vadInSpeech) {
         setMicActive(true);
-        // Only shift to listening if the student isn't currently speaking
         if (currentOrbState !== "speaking") setOrbState("listening");
         try { ws.send(JSON.stringify({ type: "speech_start" })); } catch (_) {}
       }
@@ -233,12 +351,10 @@ async function startMic() {
         try { ws.send(JSON.stringify({ type: "speech_end" })); } catch (_) {}
       }
     }
-
     try { ws.send(float32ToPcm16(input)); } catch (_) {}
   };
 
   source.connect(micProcessor);
-  // Silent gain keeps ScriptProcessor alive in some browsers
   const gain = micContext.createGain();
   gain.gain.value = 0;
   micProcessor.connect(gain);
@@ -246,7 +362,7 @@ async function startMic() {
   if (micContext.state === "suspended") await micContext.resume();
 }
 
-// ── Playback ──────────────────────────────────────────────────────────────────
+// ── Playback ───────────────────────────────────────────────────────────────────
 async function playPcm24k(arrayBuffer) {
   if (!arrayBuffer || arrayBuffer.byteLength === 0) return;
   try {
@@ -286,30 +402,41 @@ function stopPlayback() {
   nextPlayTime = 0;
 }
 
-// ── Session lifecycle ─────────────────────────────────────────────────────────
+// ── Session lifecycle ──────────────────────────────────────────────────────────
 function showSession(topic) {
   setupScreen.style.display   = "none";
   sessionScreen.style.display = "flex";
+  sessionScreen.classList.toggle("video-mode",    useCameraEl.checked);
+  sessionScreen.classList.toggle("classroom-mode", classroomMode);
   sessionTopicLabel.textContent = topic;
+  speakerLabel.textContent      = "";
+  speakerLabel.style.color      = "";
   setOrbState("idle");
   setStatus("Connecting…");
+  if (classroomMode) createClassroomOrbs();
 }
 
 function showSetup() {
   sessionScreen.style.display = "none";
+  sessionScreen.classList.remove("classroom-mode");
   setupScreen.style.display   = "flex";
+  speakerLabel.textContent    = "";
+  speakerLabel.style.color    = "";
   setOrbState("idle");
 }
 
 function disconnect() {
   if (ws) { try { ws.close(); } catch (_) {} ws = null; }
   if (micProcessor) { try { micProcessor.disconnect(); } catch (_) {} micProcessor = null; }
-  if (micStream)  { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
-  if (micContext) { try { micContext.close(); } catch (_) {} micContext = null; }
+  if (micStream)    { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+  if (micContext)   { try { micContext.close(); } catch (_) {} micContext = null; }
+  if (frameInterval){ clearInterval(frameInterval); frameInterval = null; }
+  if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
+  cameraFeed.srcObject = null;
   stopPlayback();
 
   audioChunksReceived = 0;
-  vadInSpeech  = false;
+  vadInSpeech   = false;
   vadSilenceCount = 0;
   micMuted = false;
   muteBtn.textContent = "Mute";
@@ -323,26 +450,40 @@ function disconnect() {
 
 async function connect() {
   lastError = null;
-  const topic = getSelectedTopic();
+  const topic         = getSelectedTopic();
+  const materials     = materialsEl.value.trim();
+  const useVideo      = useCameraEl.checked;
+  const studentsParam = classroomMode ? Array.from(selectedStudents).join(",") : "";
+
   showSession(topic);
 
-  // Unlock AudioContext on user gesture (browser autoplay policy)
   if (!playbackContext)
     playbackContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: RECV_SAMPLE_RATE });
   if (playbackContext.state === "suspended") await playbackContext.resume();
 
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const url = `${protocol}//${window.location.host}/ws/live`
-    + `?topic=${encodeURIComponent(topic)}&persona=${encodeURIComponent(selectedPersona)}`;
+    + `?topic=${encodeURIComponent(topic)}`
+    + `&persona=${encodeURIComponent(selectedPersona)}`
+    + `&video=${useVideo ? "1" : "0"}`
+    + `&classroom=${classroomMode ? "1" : "0"}`
+    + (studentsParam ? `&students=${encodeURIComponent(studentsParam)}` : "")
+    + (materials     ? `&materials=${encodeURIComponent(materials)}`    : "");
+
   ws = new WebSocket(url);
   ws.binaryType = "arraybuffer";
 
   ws.onopen = async () => {
     setStatus("Your student is ready — start explaining.", "connected");
     try {
-      await startMic();
+      if (useVideo) {
+        const stream = await startCamera();
+        await startMic(stream);
+      } else {
+        await startMic();
+      }
     } catch (e) {
-      setStatus("Mic access failed: " + e.message, "error");
+      setStatus("Camera/mic access failed: " + e.message, "error");
     }
   };
 
@@ -350,11 +491,9 @@ async function connect() {
   ws.onerror = () => { lastError = "Connection error."; setStatus("Connection error.", "error"); };
 
   ws.onmessage = async event => {
-    // Raw binary audio
     if (event.data instanceof ArrayBuffer) { await playPcm24k(event.data); return; }
     if (event.data instanceof Blob)        { await playPcm24k(await event.data.arrayBuffer()); return; }
 
-    // JSON
     try {
       const msg = JSON.parse(event.data);
 
@@ -363,14 +502,27 @@ async function connect() {
 
       if (msg.type === "turn_complete") {
         audioChunksReceived = 0;
-        // Student finished — return to listening state, waiting for teacher
         setOrbState("listening");
         setStatus("Your turn — speak and pause when done.", "connected");
       }
 
-      if (msg.type === "transcript" && msg.text) {
-        const detected = stateFromTranscript(msg.text);
-        if (detected) setOrbState(detected);
+      if (msg.type === "emotion" && SERVER_EMOTION_STATES.has(msg.state)) {
+        if (!classroomMode) setOrbState(msg.state);
+      }
+
+      if (msg.type === "student_speaking" && msg.name) {
+        if (classroomMode) {
+          activateStudentOrb(msg.name.toLowerCase());
+          setStatus(`${STUDENTS[msg.name.toLowerCase()]?.name || msg.name} is speaking…`, "connected");
+        } else {
+          setSpeaker(msg.name);
+        }
+      }
+
+      if (msg.type === "student_turn_complete" && msg.studentId) {
+        deactivateStudentOrb(msg.studentId);
+        audioChunksReceived = 0;
+        setStatus("Your turn — speak and pause when done.", "connected");
       }
 
       if (msg.type === "audio" && msg.base64) {
@@ -381,12 +533,22 @@ async function connect() {
           await playPcm24k(bytes.buffer);
         } catch (e) { console.error("Audio decode error:", e); }
       }
+
+      if (msg.type === "classroom_audio" && msg.base64) {
+        try {
+          const binary = atob(msg.base64);
+          const bytes  = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          await playPcm24k(bytes.buffer);
+        } catch (e) { console.error("Classroom audio decode error:", e); }
+      }
     } catch (_) {}
   };
 }
 
-// ── Controls ──────────────────────────────────────────────────────────────────
+// ── Controls ───────────────────────────────────────────────────────────────────
 startBtn.addEventListener("click", async () => {
+  if (classroomMode && selectedStudents.size < 2) { setStatus("Select at least 2 students.", "error"); return; }
   if (!getSelectedTopic()) { setStatus("Pick a topic first.", "error"); return; }
   startBtn.disabled = true;
   await connect();
@@ -401,6 +563,19 @@ muteBtn.addEventListener("click", () => {
   muteBtn.classList.toggle("muted", micMuted);
 });
 
+function sendChatMessage() {
+  const text = chatInput.value.trim();
+  if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+  try {
+    ws.send(JSON.stringify({ type: "text_input", text }));
+    chatInput.value = "";
+    setOrbState("thinking");
+  } catch (_) {}
+}
+
+chatSendBtn.addEventListener("click", sendChatMessage);
+chatInput.addEventListener("keydown", e => { if (e.key === "Enter") sendChatMessage(); });
+
 doneSpeakingBtn.addEventListener("click", () => {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   try {
@@ -410,5 +585,5 @@ doneSpeakingBtn.addEventListener("click", () => {
   } catch (_) {}
 });
 
-// ── Boot ──────────────────────────────────────────────────────────────────────
+// ── Boot ───────────────────────────────────────────────────────────────────────
 loadTopics();
