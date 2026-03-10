@@ -1,106 +1,224 @@
 /**
- * Dasko frontend — topic selection, WebSocket, mic capture, and student voice playback.
- * Live API: send 16-bit PCM 16kHz mono; receive 16-bit PCM 24kHz mono.
+ * Dasko — mic capture, WebSocket proxy, audio playback, orb state engine.
+ * Live API: send 16-bit PCM 16 kHz mono; receive 16-bit PCM 24 kHz mono.
  */
 
-const statusEl = document.getElementById("status");
-const topicSelect = document.getElementById("topic");
-const customTopic = document.getElementById("customTopic");
-const startBtn = document.getElementById("startBtn");
-const stopBtn = document.getElementById("stopBtn");
-const muteBtn = document.getElementById("muteBtn");
+// ── DOM refs ──────────────────────────────────────────────────────────────────
+const setupScreen     = document.getElementById("setup-screen");
+const sessionScreen   = document.getElementById("session-screen");
+const topicSelect     = document.getElementById("topic");
+const customTopic     = document.getElementById("customTopic");
+const startBtn        = document.getElementById("startBtn");
+const stopBtn         = document.getElementById("stopBtn");
+const muteBtn         = document.getElementById("muteBtn");
 const doneSpeakingBtn = document.getElementById("doneSpeakingBtn");
+const statusEl        = document.getElementById("status");
+const sessionTopicLabel = document.getElementById("sessionTopicLabel");
 
-function setStatus(message, type = "") {
-  statusEl.textContent = message;
-  statusEl.className = "status " + type;
-}
+// Orb
+const orb      = document.getElementById("orb");
+const orbWrap  = document.getElementById("orbWrap");
+const orbLabel = document.getElementById("orbLabel");
 
-function appendTranscriptLine(lineText) {
-  const transcriptEl = document.getElementById("transcript");
-  if (!transcriptEl) return;
-  const p = document.createElement("p");
-  p.className = lineText.startsWith("Student:") ? "student-line" : "user-line";
-  p.textContent = lineText;
-  transcriptEl.appendChild(p);
-  transcriptEl.scrollTop = transcriptEl.scrollHeight;
+// Mic indicator
+const micDot   = document.getElementById("micDot");
+const micLabel = document.getElementById("micLabel");
+
+// ── Persona selection ─────────────────────────────────────────────────────────
+let selectedPersona = "eager";
+document.querySelectorAll(".persona-card").forEach(card => {
+  card.addEventListener("click", () => {
+    document.querySelectorAll(".persona-card").forEach(c => c.classList.remove("selected"));
+    card.classList.add("selected");
+    selectedPersona = card.dataset.persona;
+  });
+});
+
+// ── Topic loading ─────────────────────────────────────────────────────────────
+function escapeHtml(s) {
+  const d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
 }
 
 async function loadTopics() {
   try {
-    const base = window.location.origin;
-    const res = await fetch(`${base}/api/topics`);
+    const res  = await fetch(`${window.location.origin}/api/topics`);
     const data = await res.json();
-    topicSelect.innerHTML = data.topics.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
-  } catch (e) {
+    topicSelect.innerHTML = data.topics
+      .map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`)
+      .join("");
+  } catch {
     topicSelect.innerHTML = '<option value="">Could not load topics</option>';
-    setStatus("Could not load topics: " + e.message, "error");
   }
-}
-
-function escapeHtml(s) {
-  const div = document.createElement("div");
-  div.textContent = s;
-  return div.innerHTML;
 }
 
 function getSelectedTopic() {
-  const custom = customTopic.value.trim();
-  if (custom) return custom;
-  return topicSelect.value || "the topic the teacher will explain";
+  return customTopic.value.trim() || topicSelect.value || "the topic the teacher will explain";
 }
 
-let ws = null;
-let lastError = null;
-let micStream = null;
-let micContext = null;
-let micProcessor = null;
-let micMuted = false;
-let playbackContext = null;
+// ── Orb state machine ─────────────────────────────────────────────────────────
+//
+// Each state sets CSS custom properties on the orb + optional ripple rings.
+// Transitions between colors/glow are handled by CSS `transition`.
+//
+const ORB_STATES = {
+  idle: {
+    color: "#EBEBEB",
+    glow:  "rgba(235,235,235,0.5)",
+    speed: "3.5s",
+    rings: false,
+    label: "",
+  },
+  listening: {          // student attentive, teacher's turn
+    color: "#93C5FD",
+    glow:  "rgba(147,197,253,0.45)",
+    speed: "2.2s",
+    rings: false,
+    label: "Listening…",
+  },
+  thinking: {           // teacher stopped, model processing
+    color: "#C4B5FD",
+    glow:  "rgba(196,181,253,0.5)",
+    speed: "2.6s",
+    rings: false,
+    label: "Thinking…",
+  },
+  speaking: {           // student audio is playing
+    color: "#FF7355",
+    glow:  "rgba(255,115,85,0.5)",
+    speed: "0.85s",
+    rings: true,
+    label: "Speaking…",
+  },
+  curious: {
+    color: "#FBBF24",
+    glow:  "rgba(251,191,36,0.45)",
+    speed: "1.6s",
+    rings: false,
+    label: "Curious!",
+  },
+  confused: {
+    color: "#FDA4AF",
+    glow:  "rgba(253,164,175,0.45)",
+    speed: "2.9s",
+    rings: false,
+    label: "Hmm…",
+  },
+  excited: {
+    color: "#FF7355",
+    glow:  "rgba(255,115,85,0.65)",
+    speed: "0.65s",
+    rings: true,
+    label: "Excited!",
+  },
+};
+
+let currentOrbState = "idle";
+
+function setOrbState(name) {
+  if (name === currentOrbState) return;
+  currentOrbState = name;
+  const s = ORB_STATES[name] || ORB_STATES.idle;
+
+  orb.style.setProperty("--orb-color", s.color);
+  orb.style.setProperty("--orb-glow",  s.glow);
+  orb.style.setProperty("--orb-speed", s.speed);
+  // Ripple rings need the color too
+  orbWrap.style.setProperty("--orb-color", s.color);
+
+  // Restart animation so speed change kicks in immediately
+  orb.style.animation = "none";
+  void orb.offsetWidth;
+  orb.style.animation = "";
+
+  orbWrap.classList.toggle("rings-on", s.rings);
+  orbLabel.textContent = s.label;
+}
+
+// Detect an orb state from the student's transcript text
+function stateFromTranscript(text) {
+  const t = text.toLowerCase();
+  if (/don'?t (get|understand)|confused|lost|unclear|not following|repeat that|huh\?/.test(t))
+    return "confused";
+  if (/wow|amazing|love (it|that)|brilliant|awesome|perfect|exactly right/.test(t))
+    return "excited";
+  if (/(why|how|what|when|where)\s+.{0,30}\?/.test(t) || (t.match(/\?/g) || []).length >= 2)
+    return "curious";
+  return null;
+}
+
+// ── Mic indicator ─────────────────────────────────────────────────────────────
+function setMicActive(active) {
+  micDot.classList.toggle("active", active);
+  micLabel.classList.toggle("active", active);
+  micLabel.textContent = active ? "mic on" : "mic off";
+}
+
+// ── Status ────────────────────────────────────────────────────────────────────
+function setStatus(msg, type = "") {
+  statusEl.textContent = msg;
+  statusEl.className   = type;
+}
+
+// ── Audio / WebSocket state ───────────────────────────────────────────────────
+let ws               = null;
+let lastError        = null;
+let micStream        = null;
+let micContext       = null;
+let micProcessor     = null;
+let micMuted         = false;
+let playbackContext  = null;
 let playbackGainNode = null;
-let nextPlayTime = 0;
+let nextPlayTime     = 0;
+let audioChunksReceived = 0;
 
 const SEND_SAMPLE_RATE = 16000;
 const RECV_SAMPLE_RATE = 24000;
-const BUFFER_SIZE = 2048;
-// Only send speech_end after this many silent buffers (avoid firing during pauses mid-sentence).
-// 2048 samples @ 16kHz ≈ 128ms per buffer; 18 buffers ≈ 2.3s of silence.
+const BUFFER_SIZE      = 2048;
+// 2048 samples @ 16 kHz ≈ 128 ms/buffer; 18 buffers ≈ 2.3 s silence before speech_end
 const SILENCE_BUFFERS_BEFORE_END = 18;
-const SPEECH_ENERGY_THRESHOLD = 0.006;
-let vadInSpeech = false;
+const SPEECH_ENERGY_THRESHOLD   = 0.006;
+
+let vadInSpeech    = false;
 let vadSilenceCount = 0;
 
-function float32ToPcm16(float32Array) {
-  const pcm16 = new Int16Array(float32Array.length);
-  for (let i = 0; i < float32Array.length; i++) {
-    const s = Math.max(-1, Math.min(1, float32Array[i]));
-    pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+// ── PCM helpers ───────────────────────────────────────────────────────────────
+function float32ToPcm16(f32) {
+  const pcm = new Int16Array(f32.length);
+  for (let i = 0; i < f32.length; i++) {
+    const s = Math.max(-1, Math.min(1, f32[i]));
+    pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
   }
-  return pcm16.buffer;
+  return pcm.buffer;
 }
 
-function pcm16ToFloat32(pcm16Array) {
-  const float32 = new Float32Array(pcm16Array.length);
-  for (let i = 0; i < pcm16Array.length; i++) {
-    float32[i] = pcm16Array[i] / (pcm16Array[i] < 0 ? 0x8000 : 0x7fff);
-  }
-  return float32;
+function pcm16ToFloat32(pcm16) {
+  const f32 = new Float32Array(pcm16.length);
+  for (let i = 0; i < pcm16.length; i++)
+    f32[i] = pcm16[i] / (pcm16[i] < 0 ? 0x8000 : 0x7fff);
+  return f32;
 }
 
-async function startMic(sendAudio) {
-  micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+// ── Mic capture ───────────────────────────────────────────────────────────────
+async function startMic() {
+  micStream  = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
   micContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SEND_SAMPLE_RATE });
   const source = micContext.createMediaStreamSource(micStream);
-  // ScriptProcessorNode is deprecated; use for broad compatibility (AudioWorklet needs a separate worklet file).
+
   micProcessor = micContext.createScriptProcessor(BUFFER_SIZE, 1, 1);
-  micProcessor.onaudioprocess = (e) => {
+  micProcessor.onaudioprocess = e => {
     if (micMuted || !ws || ws.readyState !== WebSocket.OPEN) return;
     const input = e.inputBuffer.getChannelData(0);
     let sum = 0;
     for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
     const rms = Math.sqrt(sum / input.length);
+
     if (rms > SPEECH_ENERGY_THRESHOLD) {
       if (!vadInSpeech) {
+        setMicActive(true);
+        // Only shift to listening if the student isn't currently speaking
+        if (currentOrbState !== "speaking") setOrbState("listening");
         try { ws.send(JSON.stringify({ type: "speech_start" })); } catch (_) {}
       }
       vadInSpeech = true;
@@ -110,65 +228,53 @@ async function startMic(sendAudio) {
       if (vadSilenceCount >= SILENCE_BUFFERS_BEFORE_END) {
         vadInSpeech = false;
         vadSilenceCount = 0;
-        try {
-          ws.send(JSON.stringify({ type: "speech_end" }));
-        } catch (_) {}
+        setMicActive(false);
+        if (currentOrbState !== "speaking") setOrbState("thinking");
+        try { ws.send(JSON.stringify({ type: "speech_end" })); } catch (_) {}
       }
     }
-    const pcm = float32ToPcm16(input);
-    try {
-      ws.send(pcm);
-    } catch (_) {}
+
+    try { ws.send(float32ToPcm16(input)); } catch (_) {}
   };
+
   source.connect(micProcessor);
+  // Silent gain keeps ScriptProcessor alive in some browsers
   const gain = micContext.createGain();
   gain.gain.value = 0;
   micProcessor.connect(gain);
   gain.connect(micContext.destination);
   if (micContext.state === "suspended") await micContext.resume();
-  return () => {
-    try {
-      if (micProcessor) micProcessor.disconnect();
-      if (micStream) micStream.getTracks().forEach((t) => t.stop());
-      if (micContext) micContext.close();
-    } catch (_) {}
-    micProcessor = null;
-    micStream = null;
-    micContext = null;
-  };
 }
 
-let audioChunksReceived = 0;
-
+// ── Playback ──────────────────────────────────────────────────────────────────
 async function playPcm24k(arrayBuffer) {
   if (!arrayBuffer || arrayBuffer.byteLength === 0) return;
   try {
     audioChunksReceived++;
-    const pcm16 = new Int16Array(arrayBuffer);
-    const float32 = pcm16ToFloat32(pcm16);
-    if (!playbackContext) {
+    if (audioChunksReceived === 1) setOrbState("speaking");
+
+    if (!playbackContext)
       playbackContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: RECV_SAMPLE_RATE });
-    }
-    const ctx = playbackContext;
-    // Must await resume() — browsers keep AudioContext suspended until user gesture; without this, no sound plays.
-    if (ctx.state === "suspended") {
-      await ctx.resume();
-    }
-    const numSamples = float32.length;
-    const buffer = ctx.createBuffer(1, numSamples, RECV_SAMPLE_RATE);
-    buffer.getChannelData(0).set(float32);
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
+    if (playbackContext.state === "suspended") await playbackContext.resume();
+
+    const pcm16 = new Int16Array(arrayBuffer);
+    const f32   = pcm16ToFloat32(pcm16);
+    const buf   = playbackContext.createBuffer(1, f32.length, RECV_SAMPLE_RATE);
+    buf.getChannelData(0).set(f32);
+
+    const src = playbackContext.createBufferSource();
+    src.buffer = buf;
     if (!playbackGainNode) {
-      playbackGainNode = ctx.createGain();
+      playbackGainNode = playbackContext.createGain();
       playbackGainNode.gain.value = 2.5;
-      playbackGainNode.connect(ctx.destination);
+      playbackGainNode.connect(playbackContext.destination);
     }
-    source.connect(playbackGainNode);
-    const now = ctx.currentTime;
+    src.connect(playbackGainNode);
+
+    const now = playbackContext.currentTime;
     if (nextPlayTime < now) nextPlayTime = now;
-    source.start(nextPlayTime);
-    nextPlayTime += buffer.duration;
+    src.start(nextPlayTime);
+    nextPlayTime += buf.duration;
   } catch (err) {
     console.error("playPcm24k error:", err);
   }
@@ -176,186 +282,133 @@ async function playPcm24k(arrayBuffer) {
 
 function stopPlayback() {
   playbackGainNode = null;
-  if (playbackContext) {
-    try {
-      playbackContext.close();
-    } catch (_) {}
-    playbackContext = null;
-  }
+  if (playbackContext) { try { playbackContext.close(); } catch (_) {} playbackContext = null; }
   nextPlayTime = 0;
 }
 
+// ── Session lifecycle ─────────────────────────────────────────────────────────
+function showSession(topic) {
+  setupScreen.style.display   = "none";
+  sessionScreen.style.display = "flex";
+  sessionTopicLabel.textContent = topic;
+  setOrbState("idle");
+  setStatus("Connecting…");
+}
+
+function showSetup() {
+  sessionScreen.style.display = "none";
+  setupScreen.style.display   = "flex";
+  setOrbState("idle");
+}
+
 function disconnect() {
-  if (ws) {
-    ws.close();
-    ws = null;
-  }
-  if (micProcessor) {
-    try {
-      micProcessor.disconnect();
-    } catch (_) {}
-    micProcessor = null;
-  }
-  if (micStream) {
-    micStream.getTracks().forEach((t) => t.stop());
-    micStream = null;
-  }
-  if (micContext) {
-    try {
-      micContext.close();
-    } catch (_) {}
-    micContext = null;
-  }
+  if (ws) { try { ws.close(); } catch (_) {} ws = null; }
+  if (micProcessor) { try { micProcessor.disconnect(); } catch (_) {} micProcessor = null; }
+  if (micStream)  { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+  if (micContext) { try { micContext.close(); } catch (_) {} micContext = null; }
   stopPlayback();
+
   audioChunksReceived = 0;
-  vadInSpeech = false;
+  vadInSpeech  = false;
   vadSilenceCount = 0;
-  startBtn.style.display = "block";
-  stopBtn.style.display = "none";
-  if (muteBtn) muteBtn.style.display = "none";
-  if (doneSpeakingBtn) doneSpeakingBtn.style.display = "none";
-  setStatus(
-    lastError ? "Session ended. " + lastError : "Session ended. Choose a topic and start again when ready."
-  );
-  const transcriptEl = document.getElementById("transcript");
-  if (transcriptEl) transcriptEl.innerHTML = "";
+  micMuted = false;
+  muteBtn.textContent = "Mute";
+  muteBtn.classList.remove("muted");
+  setMicActive(false);
+
+  if (lastError) setStatus(lastError, "error");
+  else setStatus("Session ended.");
+  setTimeout(showSetup, 1200);
 }
 
 async function connect() {
   lastError = null;
-  // Unlock playback AudioContext on this user gesture so first chunk can play (autoplay policy).
-  // Use 24kHz to match Gemini Live API output; wrong rate causes wrong speed or failed playback.
-  if (!playbackContext) {
+  const topic = getSelectedTopic();
+  showSession(topic);
+
+  // Unlock AudioContext on user gesture (browser autoplay policy)
+  if (!playbackContext)
     playbackContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: RECV_SAMPLE_RATE });
-  }
-  if (playbackContext.state === "suspended") {
-    await playbackContext.resume();
-  }
+  if (playbackContext.state === "suspended") await playbackContext.resume();
+
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const topic = encodeURIComponent(getSelectedTopic());
-  const url = `${protocol}//${window.location.host}/ws/live?topic=${topic}`;
+  const url = `${protocol}//${window.location.host}/ws/live`
+    + `?topic=${encodeURIComponent(topic)}&persona=${encodeURIComponent(selectedPersona)}`;
   ws = new WebSocket(url);
   ws.binaryType = "arraybuffer";
 
   ws.onopen = async () => {
-    setStatus("Connected. Requesting microphone…", "connected");
+    setStatus("Your student is ready — start explaining.", "connected");
     try {
       await startMic();
-      setStatus("Your student is listening — speak, then pause; they’ll respond when you stop. Use “Done speaking” if they don’t.", "connected");
-      if (muteBtn) {
-        muteBtn.style.display = "block";
-        muteBtn.textContent = "Mute mic";
-        muteBtn.dataset.muted = "false";
-      }
-      if (doneSpeakingBtn) doneSpeakingBtn.style.display = "block";
     } catch (e) {
-      setStatus("Connected but mic failed: " + e.message + ". Check mic permission.", "error");
+      setStatus("Mic access failed: " + e.message, "error");
     }
   };
 
-  ws.onclose = () => {
-    if (lastError) setStatus("Session ended. " + lastError, "error");
-    else setStatus("Session ended.");
-    disconnect();
-  };
+  ws.onclose = () => disconnect();
+  ws.onerror = () => { lastError = "Connection error."; setStatus("Connection error.", "error"); };
 
-  ws.onerror = () => setStatus("WebSocket error.", "error");
+  ws.onmessage = async event => {
+    // Raw binary audio
+    if (event.data instanceof ArrayBuffer) { await playPcm24k(event.data); return; }
+    if (event.data instanceof Blob)        { await playPcm24k(await event.data.arrayBuffer()); return; }
 
-  ws.onmessage = async (event) => {
-    if (typeof event.data === "string") {
-      try {
-        const msg = JSON.parse(event.data);
-        if (msg.type === "info") setStatus(msg.message || "Connected.", "connected");
-        if (msg.type === "turn_complete") {
-          audioChunksReceived = 0;
-          setStatus("Your student is done — speak now, then pause. They'll respond when you stop.", "connected");
-        }
-        if (msg.type === "error") {
-          lastError = msg.message;
-          setStatus("Error: " + msg.message, "error");
-        }
-        if (msg.type === "transcript" && msg.text) {
-          appendTranscriptLine("Student: " + msg.text);
-        }
-        if (msg.type === "audio" && msg.base64) {
-          console.log("Audio received: chunk #" + (audioChunksReceived + 1) + ", base64 length=" + (msg.base64 && msg.base64.length));
-          if (audioChunksReceived === 0) {
-            setStatus("Playing student audio…", "connected");
-            appendTranscriptLine("Student: [speaking…]");
-          }
-          try {
-            const binary = atob(msg.base64);
-            const bytes = new Uint8Array(binary.length);
-            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-            await playPcm24k(bytes.buffer);
-          } catch (e) {
-            setStatus("Playback error: " + (e && e.message ? e.message : String(e)), "error");
-            console.error("playPcm24k error:", e);
-          }
-          return;
-        }
-      } catch (_) {
-        setStatus("Message: " + event.data);
+    // JSON
+    try {
+      const msg = JSON.parse(event.data);
+
+      if (msg.type === "info")  setStatus(msg.message || "", "connected");
+      if (msg.type === "error") { lastError = msg.message; setStatus(msg.message, "error"); }
+
+      if (msg.type === "turn_complete") {
+        audioChunksReceived = 0;
+        // Student finished — return to listening state, waiting for teacher
+        setOrbState("listening");
+        setStatus("Your turn — speak and pause when done.", "connected");
       }
-      return;
-    }
-    if (event.data instanceof ArrayBuffer) {
-      if (audioChunksReceived === 0) {
-        setStatus("Playing student audio…", "connected");
-        appendTranscriptLine("Student: [speaking…]");
+
+      if (msg.type === "transcript" && msg.text) {
+        const detected = stateFromTranscript(msg.text);
+        if (detected) setOrbState(detected);
       }
-      await playPcm24k(event.data);
-      return;
-    }
-    if (event.data instanceof Blob) {
-      if (audioChunksReceived === 0) {
-        setStatus("Playing student audio…", "connected");
-        appendTranscriptLine("Student: [speaking…]");
+
+      if (msg.type === "audio" && msg.base64) {
+        try {
+          const binary = atob(msg.base64);
+          const bytes  = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          await playPcm24k(bytes.buffer);
+        } catch (e) { console.error("Audio decode error:", e); }
       }
-      const buf = await event.data.arrayBuffer();
-      await playPcm24k(buf);
-    }
+    } catch (_) {}
   };
 }
 
+// ── Controls ──────────────────────────────────────────────────────────────────
 startBtn.addEventListener("click", async () => {
-  const topic = getSelectedTopic();
-  if (!topic) {
-    setStatus("Pick or type a topic first.", "error");
-    return;
-  }
-  setStatus("Connecting…");
-  connect();
-  startBtn.style.display = "none";
-  stopBtn.style.display = "block";
+  if (!getSelectedTopic()) { setStatus("Pick a topic first.", "error"); return; }
+  startBtn.disabled = true;
+  await connect();
+  startBtn.disabled = false;
 });
 
-stopBtn.addEventListener("click", disconnect);
+stopBtn.addEventListener("click", () => { lastError = null; disconnect(); });
 
-if (muteBtn) {
-  muteBtn.addEventListener("click", () => {
-    micMuted = !micMuted;
-    muteBtn.textContent = micMuted ? "Unmute mic" : "Mute mic";
-    muteBtn.dataset.muted = String(micMuted);
-  });
-}
+muteBtn.addEventListener("click", () => {
+  micMuted = !micMuted;
+  muteBtn.textContent = micMuted ? "Unmute" : "Mute";
+  muteBtn.classList.toggle("muted", micMuted);
+});
 
-function sendSpeechEnd() {
+doneSpeakingBtn.addEventListener("click", () => {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   try {
     ws.send(JSON.stringify({ type: "speech_end" }));
-    setStatus("Signaled done speaking — student should respond now.", "connected");
-    setTimeout(() => {
-      if (ws && ws.readyState === WebSocket.OPEN)
-        setStatus("Your student is listening — speak or click Done speaking when finished.", "connected");
-    }, 2000);
-  } catch (e) {
-    setStatus("Failed to send: " + e.message, "error");
-  }
-}
+    setOrbState("thinking");
+    setMicActive(false);
+  } catch (_) {}
+});
 
-if (doneSpeakingBtn) {
-  doneSpeakingBtn.addEventListener("click", sendSpeechEnd);
-}
-
+// ── Boot ──────────────────────────────────────────────────────────────────────
 loadTopics();
