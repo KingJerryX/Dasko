@@ -105,6 +105,8 @@ Dasko/
 - Server forwards audio to the Gemini Live API via `sendRealtimeInput`. The API handles VAD (voice activity detection) — no push-to-talk needed.
 - On connect, the server triggers the student’s greeting via `sendRealtimeInput({ text: “...” })` (same mode as mic audio — mixing `sendClientContent` and `sendRealtimeInput` in one session causes issues).
 - Student audio responses stream back as base64 PCM at 24 kHz and are played in the browser via the Web Audio API.
+- **Study materials** — **Drag-and-drop** PDF, PPTX, text, or images; text is extracted into the box (see **[docs/STUDY_MATERIALS.md](docs/STUDY_MATERIALS.md)**). Or paste from NotebookLM / anywhere.
+- **Transcript** — **Web Speech API** in Chrome/Edge drives the teacher line when available; otherwise Live ASR + **Pro-model cleanup** after each turn.
 
 ---
 

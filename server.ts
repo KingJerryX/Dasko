@@ -7,6 +7,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { readFile } from 'fs/promises';
 import { IncomingMessage } from 'http';
 import dotenv from 'dotenv';
+import { extractFromBuffer } from './server/materials-extract';
 
 dotenv.config();
 
@@ -16,10 +17,13 @@ if (!GOOGLE_API_KEY) {
   process.exit(1);
 }
 
-const AUDIO_MODEL      = 'gemini-2.5-flash-native-audio-latest';
-const VIDEO_MODEL      = 'gemini-2.5-flash-native-audio-latest';
-const EMOTION_MODEL    = 'gemini-2.5-flash';
-const VALID_EMOTIONS   = new Set(['curious', 'confused', 'excited', 'listening', 'thinking']);
+const AUDIO_MODEL    = 'gemini-2.5-flash-native-audio-latest';
+const VIDEO_MODEL    = 'gemini-2.5-flash-native-audio-latest';
+const FAST_MODEL     = 'gemini-2.5-flash';
+// Heavier model for transcript cleanup only (accuracy over latency).
+const CLEANUP_MODEL  = process.env.CLEANUP_MODEL || 'gemini-2.5-pro';
+
+const VALID_EMOTIONS = new Set(['curious', 'confused', 'excited', 'listening', 'thinking']);
 
 const TOPICS = [
   'Photosynthesis',
@@ -48,6 +52,18 @@ const STUDENT_VOICES: Record<string, string> = {
   zoe:    'Zephyr',
 };
 
+type SessionEntry = { role: 'teacher' | 'student'; name: string; text: string; time: number };
+
+// ── Prompt builders ──────────────────────────────────────────────────────────
+
+const GESTURE_INSTRUCTION = `
+## Visual awareness
+You receive a live image stream from the teacher. It may be their camera (face, gestures, paper they hold up) or an on-screen whiteboard they draw on — or both over time. Pay close attention to what they write, draw, point at, or hold up. Occasionally — but not every turn — reference what you see naturally, the way a real student would: "Oh I can see you're pointing at that part — does that mean...?" or "So the diagram on the board shows... right?" Don't narrate everything visually. Only mention what they're showing when it's relevant to the explanation. If it's camera-only, body language matters (uncertainty, pauses). If it's whiteboard-heavy, treat it like a classroom board: read labels and follow arrows and diagrams.`;
+
+const GESTURE_INSTRUCTION_VOICE_ONLY = `
+## Senses
+This is a voice-only session. You can only hear the teacher.`;
+
 function getClassroomInstruction(topic: string, studentIds: string[], materials: string, video: boolean): string {
   const studentList = studentIds
     .filter(id => STUDENT_PROFILES[id])
@@ -67,7 +83,7 @@ ${studentList}
 ${materialsSection}
 
 ## Senses
-${video ? `You can see the teacher through their camera. React naturally to what they show or point at.` : `This is a voice-only session.`}
+${video ? GESTURE_INSTRUCTION.trim() : GESTURE_INSTRUCTION_VOICE_ONLY.trim()}
 
 ## CRITICAL: Formatting rule
 You MUST begin every single response with the speaking student's name followed by a colon and space.
@@ -97,13 +113,7 @@ function getStudentInstruction(topic: string, persona: string, materials: string
   const personaTrait = PERSONA_TRAITS[persona] || PERSONA_TRAITS.eager;
 
   const materialsSection = materials.trim()
-    ? `You were assigned to study the following material before this session. You've read through it, but you didn't fully understand it — there are parts that confused you or didn't quite stick:
-
----
-${materials.trim()}
----
-
-Reference this material naturally in the conversation. Say things like "I read that... but I didn't get why" or "The material mentioned X — is that related to what you're saying?" Do not recite it back — treat it as something you half-understood and are hoping the teacher will clarify.`
+    ? `You were assigned to study the following material before this session. You've read through it, but you didn't fully understand it — there are parts that confused you or didn't quite stick:\n\n---\n${materials.trim()}\n---\n\nReference this material naturally in the conversation. Say things like "I read that... but I didn't get why" or "The material mentioned X — is that related to what you're saying?" Do not recite it back — treat it as something you half-understood and are hoping the teacher will clarify.`
     : `You have general background knowledge from school and everyday life, but you haven't formally studied this topic. You may have vague familiarity with some terms or ideas, but your understanding is patchy and you have real gaps.`;
 
   return `You are a student in a "learn by teaching" session. The human is your teacher. They are going to explain "${topic}" to you.
@@ -137,10 +147,7 @@ You are NOT a blank slate. You come in with partial knowledge, possible misconce
 - Don't be sycophantic. "Great explanation!" is not something a real student says — they just nod and ask the next question.
 - Stay on topic. If you drift, the teacher will redirect you.
 
-## Senses
-${video
-  ? `You can see the teacher through their camera. React to what they show, point at, write, or display on screen. If they gesture at something or hold something up, acknowledge it naturally. Don't narrate what you see unprompted — only reference it when it's relevant to what they're explaining.`
-  : `This is a voice-only session. You can only hear the teacher.`}
+${video ? GESTURE_INSTRUCTION.trim() : GESTURE_INSTRUCTION_VOICE_ONLY.trim()}
 
 ## Starting the session
 Greet the teacher briefly and naturally — like you'd greet a tutor who just sat down. Keep it short. Then indicate you're ready to listen.`;
@@ -167,7 +174,18 @@ ${profile}
 ## Your classmates
 ${otherStudents}
 
-You are aware your classmates are in the room. You may occasionally react to something they'd naturally say (e.g. "yeah I was wondering that too" or "wait, but Marcus said...") — but you must **never speak AS them** or invent their words.
+You are aware your classmates are in the room.
+
+## Hearing your classmates
+During the session you'll occasionally receive a message formatted as:
+  [Classroom] Name: "what they said"
+
+This means that classmate just spoke. Treat it exactly as if you heard them say it out loud in class. You may:
+- Agree, build on it, or express the same confusion ("yeah I was wondering that too")
+- Politely push back or correct them if they're wrong
+- Stay quiet if you have nothing to add — **not every classmate message requires a response from you**
+
+You must **never speak AS another student** or invent their words.
 
 ## Your prior knowledge
 ${materialsSection}
@@ -176,7 +194,7 @@ ${materialsSection}
 
 **Sound like a real person:**
 - Use natural speech: "wait", "so basically", "hold on", "oh okay", "hmm"
-- Vary your reactions — don't ask a question every single turn. Sometimes just react and let the teacher continue.
+- Vary your reactions — sometimes just react and stay quiet, sometimes jump in. Not every turn requires a question.
 - Show specific confusion: not "I don't understand" but "I'm following you until the part about X"
 - Have genuine "aha!" moments
 - Make wrong connections and let the teacher correct you
@@ -190,12 +208,128 @@ ${materialsSection}
 - Don't be sycophantic.
 - Stay on topic.
 
-## Senses
-${video ? `You can see the teacher through their camera. React naturally to what they show.` : `This is a voice-only session.`}
+${video ? GESTURE_INSTRUCTION.trim() : GESTURE_INSTRUCTION_VOICE_ONLY.trim()}
 
 ## Starting
 Greet the teacher briefly and naturally. Keep it short. Then indicate you're ready to listen.`;
 }
+
+// ── Gemini helper calls ──────────────────────────────────────────────────────
+
+async function classifyEmotion(ai: GoogleGenAI, transcript: string): Promise<string | null> {
+  if (!transcript.trim()) return null;
+  try {
+    const result = await ai.models.generateContent({
+      model: FAST_MODEL,
+      contents: [{
+        role: 'user',
+        parts: [{ text:
+          `You are classifying the emotional state of a student in a tutoring session based on their response.\n\n` +
+          `Student said: "${transcript}"\n\n` +
+          `Pick exactly one emotion that best describes their state:\n` +
+          `- curious: engaged, asking questions, making connections, wanting to know more\n` +
+          `- confused: lost, struggling to follow, asking for clarification or repetition\n` +
+          `- excited: a concept just clicked, enthusiastic, having an aha moment\n` +
+          `- thinking: processing, quiet acknowledgment, absorbing what was said\n` +
+          `- listening: neutral, receptive, waiting for more\n\n` +
+          `Respond with only the single emotion word. Nothing else.`
+        }]
+      }],
+    });
+    const emotion = result.text?.trim().toLowerCase() ?? '';
+    return VALID_EMOTIONS.has(emotion) ? emotion : null;
+  } catch {
+    return null;
+  }
+}
+
+async function generateCoachingTip(
+  ai: GoogleGenAI,
+  topic: string,
+  teacherSpeech: string,
+): Promise<string | null> {
+  if (teacherSpeech.split(/\s+/).length < 12) return null;
+  try {
+    const result = await ai.models.generateContent({
+      model: FAST_MODEL,
+      contents: [{
+        role: 'user',
+        parts: [{ text:
+          `A person is teaching "${topic}" and just said:\n\n` +
+          `"${teacherSpeech}"\n\n` +
+          `Give ONE short coaching hint (1-2 sentences max). Decide which is most useful:\n\n` +
+          `PRIMARILY focus on teaching clarity and delivery:\n` +
+          `- Are they being clear, or is the explanation vague/hard to follow?\n` +
+          `- Are they using concrete examples or staying too abstract?\n` +
+          `- Could a specific analogy make this click for a student?\n` +
+          `- Are they speaking confidently, or does the explanation feel uncertain?\n\n` +
+          `ALSO flag subject-matter issues if they arise:\n` +
+          `- If the explanation is so generic it could apply to anything, point out the specific part of "${topic}" that needs more depth\n` +
+          `- If a student likely just asked something and this response didn't really address it, note what was missed\n\n` +
+          `Wrap the single most important word or phrase in **double asterisks**.\n` +
+          `Write the tip directly — no label, no bullet, no "Tip:".`
+        }]
+      }],
+    });
+    return result.text?.trim() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function generateReflection(
+  ai: GoogleGenAI,
+  topic: string,
+  sessionLog: SessionEntry[],
+): Promise<object> {
+  if (sessionLog.length < 2) {
+    return {
+      summary: 'The session was too short to generate a meaningful reflection.',
+      strengths: [],
+      gaps: [],
+      topQuestions: [],
+      improvements: ['Try a longer session — aim for at least 5 minutes of explanation.'],
+    };
+  }
+
+  const transcript = sessionLog
+    .map(e => `${e.role === 'teacher' ? 'Teacher' : e.name}: ${e.text}`)
+    .join('\n');
+
+  try {
+    const result = await ai.models.generateContent({
+      model: FAST_MODEL,
+      contents: [{
+        role: 'user',
+        parts: [{ text:
+          `You are analyzing a "learn by teaching" session where a human taught "${topic}" to AI students.\n\n` +
+          `Full transcript:\n${transcript}\n\n` +
+          `Return a JSON object (no markdown, no code block) with exactly these keys:\n` +
+          `- "summary": string — 2-3 sentences summarising what was covered\n` +
+          `- "strengths": string[] — 2-3 specific things the teacher did well\n` +
+          `- "gaps": string[] — 2-3 concepts that were missed, skipped, or explained unclearly (empty array if none)\n` +
+          `- "topQuestions": string[] — the 3 most insightful student questions verbatim (fewer if session was short)\n` +
+          `- "improvements": string[] — 2-3 concrete, actionable suggestions for next time\n\n` +
+          `Return ONLY valid JSON. No extra text.`
+        }]
+      }],
+    });
+
+    const raw = result.text?.trim() ?? '';
+    const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '');
+    return JSON.parse(cleaned);
+  } catch {
+    return {
+      summary: `You taught "${topic}". A detailed reflection could not be generated.`,
+      strengths: [],
+      gaps: [],
+      topQuestions: [],
+      improvements: [],
+    };
+  }
+}
+
+// ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
   const ai = new GoogleGenAI({ vertexai: false, apiKey: GOOGLE_API_KEY });
@@ -222,6 +356,116 @@ async function main() {
     return c.json({ topics: TOPICS });
   });
 
+  // Cleans up raw ASR output: fixes misspelled technical terms without changing meaning.
+  // Extract text from dropped files (PDF, PPTX, TXT/MD) for Study materials.
+  app.post('/api/materials/extract', async (c) => {
+    try {
+      const formData = await c.req.formData();
+      const file = formData.get('file');
+      if (!file || typeof file === 'string' || !(file instanceof File)) {
+        return c.json({ error: 'Missing file field' }, 400);
+      }
+      const buf = Buffer.from(await file.arrayBuffer());
+      const mime = file.type || 'application/octet-stream';
+      let result = await extractFromBuffer(buf, mime, file.name);
+
+      // Images: OCR-ish via Gemini when extractFromBuffer returns unsupported
+      if (!result.text && mime.startsWith('image/') && buf.length < 4 * 1024 * 1024) {
+        try {
+          const b64 = buf.toString('base64');
+          const mimeType = mime || 'image/png';
+          const gen = await ai.models.generateContent({
+            model: FAST_MODEL,
+            contents: [{
+              role: 'user',
+              parts: [
+                {
+                  inlineData: { mimeType, data: b64 },
+                },
+                {
+                  text:
+                    'Transcribe every readable word in this image (slides, handwriting, diagrams with labels). ' +
+                    'Output plain text only, preserve line breaks where helpful. If no text, say [no text].',
+                },
+              ],
+            }],
+          });
+          const text = (gen.text || '').trim();
+          if (text && text !== '[no text]') result = { text: text.slice(0, 120_000) };
+          else result = { text: '', error: 'No text detected in image.' };
+        } catch (e) {
+          result = {
+            text: '',
+            error: e instanceof Error ? e.message : 'Image text extraction failed.',
+          };
+        }
+      }
+
+      if (result.error && !result.text) return c.json({ error: result.error }, 422);
+      return c.json({ text: result.text, filename: file.name });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('[Dasko] /api/materials/extract', msg);
+      return c.json({ error: msg }, 500);
+    }
+  });
+
+  // Image generation disabled — was stalling Live when combined with video_frame bursts; revisit with NotebookLM/export workflow.
+  app.post('/api/diagram', (c) =>
+    c.json(
+      {
+        error: 'Image generation disabled',
+        hint: 'Use whiteboard + NotebookLM/PDF notes pasted into Study materials, or re-enable later.',
+      },
+      503,
+    ),
+  );
+
+  app.post('/api/cleanup-transcript', async (c) => {
+    let text = '';
+    let fallback = '';
+    try {
+      const body = await c.req.json<{ text: string; topic: string }>();
+      fallback = body?.text || '';
+      text = (body?.text || '').trim();
+      const topic = body?.topic || '';
+      if (!text) return c.json({ cleaned: body?.text || '' });
+      let result;
+      try {
+        result = await ai.models.generateContent({
+          model: CLEANUP_MODEL,
+        contents: [{
+          role: 'user',
+          parts: [{ text:
+            `Raw speech-to-text (may have missing spaces, merged words, or wrong words). Topic: "${topic}".\n\n` +
+            `Task: produce a single readable transcript that matches what a human likely said.\n` +
+            `- Insert spaces between words where ASR merged them (e.g. "thewater" → "the water").\n` +
+            `- Fix homophones and technical terms using topic context.\n` +
+            `- Keep the same order and meaning; do not summarize or add ideas.\n` +
+            `- Use normal punctuation and capitalization at sentence starts.\n` +
+            `- Output plain text only, no quotes or markdown.\n\n` +
+            `Transcription:\n${text}`
+          }]
+        }],
+        });
+      } catch {
+        result = await ai.models.generateContent({
+          model: FAST_MODEL,
+          contents: [{
+            role: 'user',
+            parts: [{ text:
+              `Fix this speech transcript for topic "${topic}". Insert missing spaces, fix obvious word errors. Plain text only.\n\n${text}`
+            }]
+          }],
+        });
+      }
+      const cleaned = (result.text?.trim() || text).replace(/\s+/g, ' ').trim();
+      return c.json({ cleaned: cleaned || text });
+    } catch {
+      return c.json({ cleaned: text || fallback }, 500);
+    }
+  });
+
   const port = Number(process.env.PORT) || 8000;
   const server = serve({ fetch: app.fetch, port });
 
@@ -243,7 +487,14 @@ async function main() {
     const studentIds = (url.searchParams.get('students') || '')
       .split(',').map(s => s.trim()).filter(s => STUDENT_PROFILES[s]);
     const model      = video ? VIDEO_MODEL : AUDIO_MODEL;
-    console.log('[Dasko] New session, topic:', topic, '| persona:', persona, '| video:', video, '| classroom:', classroom, studentIds);
+
+    console.log('[Dasko] New session | topic:', topic, '| persona:', persona, '| video:', video, '| classroom:', classroom, studentIds);
+
+    // ── Per-session state ──────────────────────────────────────────────────
+    const sessionLog: SessionEntry[] = [];
+    let teacherTranscriptBuf = '';
+    let coachingCooldown     = 0;
+    let reflectionRequested  = false;
 
     function sendJson(data: object) {
       if (socket.readyState === WebSocket.OPEN) {
@@ -251,38 +502,55 @@ async function main() {
       }
     }
 
-    async function classifyAndSendEmotion(transcript: string) {
-      if (!transcript.trim()) return;
-      try {
-        const result = await ai.models.generateContent({
-          model: EMOTION_MODEL,
-          contents: [{
-            role: 'user',
-            parts: [{ text:
-              `You are classifying the emotional state of a student in a tutoring session based on their response.\n\n` +
-              `Student said: "${transcript}"\n\n` +
-              `Pick exactly one emotion that best describes their state:\n` +
-              `- curious: engaged, asking questions, making connections, wanting to know more\n` +
-              `- confused: lost, struggling to follow, asking for clarification or repetition\n` +
-              `- excited: a concept just clicked, enthusiastic, having an aha moment\n` +
-              `- thinking: processing, quiet acknowledgment, absorbing what was said\n` +
-              `- listening: neutral, receptive, waiting for more\n\n` +
-              `Respond with only the single emotion word. Nothing else.`
-            }]
-          }],
+    async function onTeacherSpeechEnd() {
+      const text = teacherTranscriptBuf.trim();
+      teacherTranscriptBuf = '';
+
+      if (!text) return;
+
+      sessionLog.push({ role: 'teacher', name: 'Teacher', text, time: Date.now() });
+
+      // Coaching tip (rate-limited to one per 20s)
+      const now = Date.now();
+      if (now > coachingCooldown) {
+        coachingCooldown = now + 20_000;
+        generateCoachingTip(ai, topic, text).then(tip => {
+          if (tip) sendJson({ type: 'coaching_tip', tip });
         });
-        const emotion = result.text?.trim().toLowerCase() ?? '';
-        if (VALID_EMOTIONS.has(emotion)) {
-          sendJson({ type: 'emotion', state: emotion });
-        }
-      } catch (e) {
-        console.error('[Dasko] Emotion classification failed:', e);
       }
     }
 
-    // ── CLASSROOM: one Live session per student, each with a distinct voice ──
+    async function onStudentSpeech(name: string, text: string) {
+      if (!text) return;
+      sessionLog.push({ role: 'student', name, text, time: Date.now() });
+      const emotion = await classifyEmotion(ai, text);
+      if (emotion) sendJson({ type: 'emotion', state: emotion });
+    }
+
+    // ── CLASSROOM MODE ─────────────────────────────────────────────────────
     if (classroom && studentIds.length >= 2) {
       let activeSpeaker: string | null = null;
+      // Small gap between speakers prevents pile-ons but is short enough that
+      // buffered audio from the winning student isn't noticeably clipped.
+      let cooldownUntil = 0;
+      const SPEAKER_GAP_MS = 500;
+
+      // Hard gate: after MAX consecutive student exchanges without teacher input
+      // all student audio is suppressed until the teacher speaks again.
+      let studentsAllowed = true;
+      let consecutiveStudentTurns = 0;
+      const MAX_STUDENT_EXCHANGES = 2;
+
+      // Per-student audio ring-buffer. Audio that arrives while cooldownUntil
+      // hasn't expired yet is buffered so the first 0-500ms of a response
+      // isn't silently dropped when the student finally claims the mic.
+      const audioBuffers = new Map<string, string[]>(studentIds.map(id => [id, []]));
+      const MAX_BUFFER_CHUNKS = 25; // ~500ms worth of audio at typical chunk rate
+
+      function clearAllBuffers() {
+        audioBuffers.forEach((_, k) => audioBuffers.set(k, []));
+      }
+
       let sessionMap: Map<string, Awaited<ReturnType<typeof ai.live.connect>>>;
 
       try {
@@ -292,6 +560,7 @@ async function main() {
           const cfg: types.LiveConnectConfig = {
             responseModalities: [Modality.AUDIO],
             outputAudioTranscription: {},
+            inputAudioTranscription:  {},
             speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
             systemInstruction: getClassroomStudentInstruction(topic, id, studentIds, materials, video),
           };
@@ -302,31 +571,81 @@ async function main() {
             callbacks: {
               onopen:  () => console.log(`[Dasko] ${id} session opened`),
               onmessage: (msg: types.LiveServerMessage) => {
+                // Teacher input transcription (only log once, from first student's session)
+                if (msg.serverContent?.inputTranscription?.text && id === studentIds[0]) {
+                  const chunk = msg.serverContent.inputTranscription.text;
+                  teacherTranscriptBuf += ' ' + chunk;
+                  sendJson({ type: 'teacher_transcript', text: chunk });
+                }
+
+                // Student output transcription — only stream if this student is active
                 if (msg.serverContent?.outputTranscription?.text) {
                   const chunk = msg.serverContent.outputTranscription.text;
                   transcriptBuf += ' ' + chunk;
                   if (activeSpeaker === id) sendJson({ type: 'transcript', text: chunk });
                 }
+
+                // Student audio
                 if (msg.serverContent?.modelTurn?.parts) {
                   for (const part of msg.serverContent.modelTurn.parts) {
-                    if (part.inlineData?.data) {
-                      if (activeSpeaker === null) {
+                    if (!part.inlineData?.data) continue;
+                    const chunk = part.inlineData.data;
+                    const now   = Date.now();
+
+                    if (!studentsAllowed) {
+                      // Hard-suppressed after too many consecutive exchanges — discard
+                      continue;
+                    }
+
+                    if (activeSpeaker === null) {
+                      if (now > cooldownUntil) {
+                        // Cooldown expired: claim the mic and flush any buffered audio first
                         activeSpeaker = id;
                         sendJson({ type: 'student_speaking', name: id });
+                        const buffered = audioBuffers.get(id) ?? [];
+                        for (const b of buffered) sendJson({ type: 'classroom_audio', studentId: id, base64: b });
+                        audioBuffers.set(id, []);
+                        sendJson({ type: 'classroom_audio', studentId: id, base64: chunk });
+                      } else {
+                        // Still in cooldown gap — buffer this chunk so the beginning isn't clipped
+                        const buf = audioBuffers.get(id) ?? [];
+                        if (buf.length < MAX_BUFFER_CHUNKS) buf.push(chunk);
+                        audioBuffers.set(id, buf);
                       }
-                      if (activeSpeaker === id) {
-                        sendJson({ type: 'classroom_audio', studentId: id, base64: part.inlineData.data });
-                      }
+                    } else if (activeSpeaker === id) {
+                      sendJson({ type: 'classroom_audio', studentId: id, base64: chunk });
                     }
+                    // Different student is active — discard
                   }
                 }
+
                 if (msg.serverContent?.turnComplete) {
                   if (activeSpeaker === id) {
                     const full = transcriptBuf.trim();
                     transcriptBuf = '';
                     activeSpeaker = null;
+                    cooldownUntil = Date.now() + SPEAKER_GAP_MS;
+                    consecutiveStudentTurns++;
+                    clearAllBuffers(); // stale buffered audio from the previous gap is now irrelevant
+
                     sendJson({ type: 'student_turn_complete', studentId: id });
-                    classifyAndSendEmotion(full);
+                    if (full) onStudentSpeech(id.charAt(0).toUpperCase() + id.slice(1), full);
+
+                    if (consecutiveStudentTurns >= MAX_STUDENT_EXCHANGES) {
+                      // Hit the limit — silence all students until teacher speaks
+                      studentsAllowed = false;
+                      sendJson({ type: 'info', message: 'Students are waiting for your response.' });
+                    } else if (full) {
+                      // Still within limit — let peers hear what was said
+                      const speakerName = id.charAt(0).toUpperCase() + id.slice(1);
+                      sessionMap.forEach((sess, otherId) => {
+                        if (otherId !== id) {
+                          try {
+                            sess.sendRealtimeInput({ text: `[Classroom] ${speakerName}: "${full}"` });
+                          } catch (_) {}
+                        }
+                      });
+                    }
                   } else {
                     transcriptBuf = '';
                   }
@@ -349,7 +668,6 @@ async function main() {
       }
 
       sendJson({ type: 'info', message: `Your classroom is ready. Start explaining: ${topic}` });
-      // Trigger a greeting from the first student only
       const firstSess = sessionMap.get(studentIds[0]);
       if (firstSess) {
         firstSess.sendRealtimeInput({ text: `The teacher has just walked in. Greet them briefly and naturally.` });
@@ -358,6 +676,10 @@ async function main() {
       socket.on('message', (data: Buffer, isBinary: boolean) => {
         if (isBinary) {
           const b64 = data.toString('base64');
+          // Teacher is speaking — re-enable students and reset the exchange counter
+          studentsAllowed = true;
+          consecutiveStudentTurns = 0;
+          clearAllBuffers();
           sessionMap.forEach(sess => {
             try { sess.sendRealtimeInput({ media: { data: b64, mimeType: 'audio/pcm;rate=16000' } }); } catch (_) {}
           });
@@ -365,6 +687,19 @@ async function main() {
         }
         try {
           const parsed = JSON.parse(data.toString());
+
+          if (parsed.type === 'speech_end') {
+            onTeacherSpeechEnd();
+            return;
+          }
+          if (parsed.type === 'request_reflection') {
+            if (reflectionRequested) return;
+            reflectionRequested = true;
+            generateReflection(ai, topic, sessionLog).then(data => {
+              sendJson({ type: 'reflection', data });
+            });
+            return;
+          }
           if (parsed.type === 'text_input' && typeof parsed.text === 'string' && parsed.text.trim()) {
             sessionMap.forEach(sess => { try { sess.sendRealtimeInput({ text: parsed.text.trim() }); } catch (_) {} });
           }
@@ -385,12 +720,13 @@ async function main() {
       return;
     }
 
-    // ── SOLO: single Live session ────────────────────────────────────────────
-    let transcriptBuffer = '';
+    // ── SOLO MODE ──────────────────────────────────────────────────────────
+    let studentTranscriptBuf = '';
 
     const config: types.LiveConnectConfig = {
       responseModalities: [Modality.AUDIO],
       outputAudioTranscription: {},
+      inputAudioTranscription:  {},
       speechConfig: {
         voiceConfig: {
           prebuiltVoiceConfig: { voiceName: 'Zephyr' },
@@ -411,11 +747,21 @@ async function main() {
             sendJson({ type: 'info', message: `Your student is ready. Start explaining: ${topic}` });
           },
           onmessage: (message: types.LiveServerMessage) => {
+            // Teacher input transcription
+            if (message.serverContent?.inputTranscription?.text) {
+              const chunk = message.serverContent.inputTranscription.text;
+              teacherTranscriptBuf += ' ' + chunk;
+              sendJson({ type: 'teacher_transcript', text: chunk });
+            }
+
+            // Student output transcription
             if (message.serverContent?.outputTranscription?.text) {
               const chunk = message.serverContent.outputTranscription.text;
-              transcriptBuffer += ' ' + chunk;
+              studentTranscriptBuf += ' ' + chunk;
               sendJson({ type: 'transcript', text: chunk });
             }
+
+            // Student audio
             if (message.serverContent?.modelTurn?.parts) {
               for (const part of message.serverContent.modelTurn.parts) {
                 if (part.inlineData?.data) {
@@ -423,12 +769,13 @@ async function main() {
                 }
               }
             }
+
             if (message.serverContent?.turnComplete) {
               console.log('[Dasko] Student turn complete');
               sendJson({ type: 'turn_complete' });
-              const fullTranscript = transcriptBuffer.trim();
-              transcriptBuffer = '';
-              classifyAndSendEmotion(fullTranscript);
+              const full = studentTranscriptBuf.trim();
+              studentTranscriptBuf = '';
+              if (full) onStudentSpeech('Student', full);
             }
           },
           onerror: (e: ErrorEvent) => {
@@ -453,6 +800,19 @@ async function main() {
       if (!isBinary) {
         try {
           const msg = JSON.parse(data.toString());
+
+          if (msg.type === 'speech_end') {
+            onTeacherSpeechEnd();
+            return;
+          }
+          if (msg.type === 'request_reflection') {
+            if (reflectionRequested) return;
+            reflectionRequested = true;
+            generateReflection(ai, topic, sessionLog).then(reflData => {
+              sendJson({ type: 'reflection', data: reflData });
+            });
+            return;
+          }
           if (msg.type === 'text_input' && typeof msg.text === 'string' && msg.text.trim()) {
             session.sendRealtimeInput({ text: msg.text.trim() });
           }
