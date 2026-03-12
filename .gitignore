@@ -2,3 +2,4 @@
 .env
 .cursor/
 node_modules/
+uploads/

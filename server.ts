@@ -8,6 +8,14 @@ import { readFile } from 'fs/promises';
 import { IncomingMessage } from 'http';
 import dotenv from 'dotenv';
 import { extractFromBuffer } from './server/materials-extract';
+import {
+  createMaterialsSession,
+  saveMaterialsNotes,
+  uploadMaterialFile,
+  listMaterialFiles,
+  removeMaterialFile,
+  resolveMaterialsContext,
+} from './server/materials-store';
 
 dotenv.config();
 
@@ -71,7 +79,7 @@ function getClassroomInstruction(topic: string, studentIds: string[], materials:
     .join('\n');
 
   const materialsSection = materials.trim()
-    ? `The students were all assigned to study the following material but didn't fully understand it:\n\n---\n${materials.trim()}\n---\n\nThey may reference it naturally in conversation.`
+    ? `The students have the following notes/documents (PDFs, slides, etc.) as reference. They didn't fully understand them:\n\n---\n${materials.trim()}\n---\n\nThey should reference this naturally as their notes/handouts, not recite verbatim.`
     : `The students have general background knowledge but haven't formally studied this topic.`;
 
   return `You are playing ${studentIds.length} students in a live classroom session. The human is the teacher explaining "${topic}".
@@ -113,7 +121,7 @@ function getStudentInstruction(topic: string, persona: string, materials: string
   const personaTrait = PERSONA_TRAITS[persona] || PERSONA_TRAITS.eager;
 
   const materialsSection = materials.trim()
-    ? `You were assigned to study the following material before this session. You've read through it, but you didn't fully understand it — there are parts that confused you or didn't quite stick:\n\n---\n${materials.trim()}\n---\n\nReference this material naturally in the conversation. Say things like "I read that... but I didn't get why" or "The material mentioned X — is that related to what you're saying?" Do not recite it back — treat it as something you half-understood and are hoping the teacher will clarify.`
+    ? `You have the teacher's notes and documents below (PDFs, slides, etc. — kept as reference). You've gone through them but didn't fully understand everything — some parts confused you or didn't stick:\n\n---\n${materials.trim()}\n---\n\nRefer to these naturally as **your notes**: "In the handout it said… but I didn't get…" or "The slide about X — is that the same as what you're saying?" Do not recite long passages; treat them as something you half-understood and want the teacher to clarify.`
     : `You have general background knowledge from school and everyday life, but you haven't formally studied this topic. You may have vague familiarity with some terms or ideas, but your understanding is patchy and you have real gaps.`;
 
   return `You are a student in a "learn by teaching" session. The human is your teacher. They are going to explain "${topic}" to you.
@@ -163,7 +171,7 @@ function getClassroomStudentInstruction(topic: string, studentId: string, allStu
     .join('\n');
 
   const materialsSection = materials.trim()
-    ? `You were assigned to study the following material before this session. You've read through it but didn't fully understand it:\n\n---\n${materials.trim()}\n---\n\nReference it naturally — say things like "I read that... but I didn't get why" rather than reciting it.`
+    ? `You have the following notes/documents as reference (from the teacher). You've read through but didn't fully understand:\n\n---\n${materials.trim()}\n---\n\nReference naturally as your notes — "In the handout…" / "On the slide…" — not verbatim recital.`
     : `You have general background knowledge from school and everyday life, but you haven't formally studied this topic. Your understanding is patchy and you have real gaps.`;
 
   return `You are ${name}, a student in a live classroom session. The human is the teacher explaining "${topic}".
@@ -356,8 +364,63 @@ async function main() {
     return c.json({ topics: TOPICS });
   });
 
-  // Cleans up raw ASR output: fixes misspelled technical terms without changing meaning.
-  // Extract text from dropped files (PDF, PPTX, TXT/MD) for Study materials.
+  // ── Study materials as stored context (files kept server-side; text resolved at session start) ──
+  app.post('/api/materials/session', async (c) => {
+    try {
+      const { materialsId } = await createMaterialsSession();
+      return c.json({ materialsId });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return c.json({ error: msg }, 500);
+    }
+  });
+
+  app.post('/api/materials/upload', async (c) => {
+    try {
+      const formData = await c.req.formData();
+      const materialsId = String(formData.get('materialsId') || '').trim();
+      const file = formData.get('file');
+      if (!materialsId) return c.json({ error: 'Missing materialsId' }, 400);
+      if (!file || typeof file === 'string' || !(file instanceof File)) {
+        return c.json({ error: 'Missing file' }, 400);
+      }
+      const buf = Buffer.from(await file.arrayBuffer());
+      const mime = file.type || 'application/octet-stream';
+      const { filename } = await uploadMaterialFile(materialsId, buf, file.name, mime);
+      const files = await listMaterialFiles(materialsId);
+      return c.json({ filename, files });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return c.json({ error: msg }, 500);
+    }
+  });
+
+  app.get('/api/materials/:id', async (c) => {
+    const id = c.req.param('id');
+    const files = await listMaterialFiles(id);
+    return c.json({ files });
+  });
+
+  app.delete('/api/materials/:id/file/:storedName', async (c) => {
+    const id = c.req.param('id');
+    const storedName = c.req.param('storedName');
+    await removeMaterialFile(id, storedName);
+    const files = await listMaterialFiles(id);
+    return c.json({ files });
+  });
+
+  app.put('/api/materials/:id/notes', async (c) => {
+    try {
+      const id = c.req.param('id');
+      const body = await c.req.json<{ notes?: string }>();
+      await saveMaterialsNotes(id, body?.notes || '');
+      return c.json({ ok: true });
+    } catch (e) {
+      return c.json({ error: String(e) }, 500);
+    }
+  });
+
+  // Legacy: extract-only (no storage) — still used if something calls it directly.
   app.post('/api/materials/extract', async (c) => {
     try {
       const formData = await c.req.formData();
@@ -481,7 +544,16 @@ async function main() {
 
     const topic      = url.searchParams.get('topic')     || 'the topic the teacher will explain';
     const persona    = url.searchParams.get('persona')   || 'eager';
-    const materials  = url.searchParams.get('materials') || '';
+    let materials  = url.searchParams.get('materials') || '';
+    const materialsId = url.searchParams.get('materialsId') || '';
+    if (materialsId) {
+      try {
+        const resolved = await resolveMaterialsContext(materialsId);
+        if (resolved.trim()) materials = resolved;
+      } catch (e) {
+        console.error('[Dasko] resolveMaterialsContext', e);
+      }
+    }
     const video      = url.searchParams.get('video')     === '1';
     const classroom  = url.searchParams.get('classroom') === '1';
     const studentIds = (url.searchParams.get('students') || '')

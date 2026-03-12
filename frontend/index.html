@@ -103,6 +103,19 @@
     .materials-dropzone textarea { min-height: 100px; }
     .materials-status { font-size: 0.7rem; color: #9CA3AF; min-height: 1.2em; }
     .materials-status.error { color: #DC2626; }
+    .materials-file-list {
+      list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.4rem;
+    }
+    .materials-file-item {
+      display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+      padding: 0.45rem 0.65rem; background: #F9FAFB; border-radius: 8px; font-size: 0.78rem;
+    }
+    .materials-file-name { color: #374151; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .materials-file-remove {
+      flex-shrink: 0; padding: 0.2rem 0.5rem; border: 1px solid #E5E7EB; border-radius: 6px;
+      background: #fff; font-size: 0.65rem; cursor: pointer; color: #6B7280;
+    }
+    .materials-file-remove:hover { background: #F3F4F6; }
 
     .mode-tabs { display: flex; background: #F3F4F6; border-radius: 10px; padding: 3px; gap: 3px; }
     .mode-tab {
@@ -550,14 +563,16 @@
           <input type="text" id="customTopic" placeholder="e.g. How vaccines work" />
         </div>
         <div>
-          <label class="field-label" for="materials">Study materials <span style="font-weight:400;text-transform:none;letter-spacing:0;color:#C4C9D4">(optional)</span></label>
+          <label class="field-label" for="materialsNotes">Study materials <span style="font-weight:400;text-transform:none;letter-spacing:0;color:#C4C9D4">(optional)</span></label>
           <div id="materialsDropzone" class="materials-dropzone">
             <input type="file" id="materialsFileInput" accept=".pdf,.pptx,.txt,.md,.png,.jpg,.jpeg,.webp,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain" multiple hidden />
             <div class="materials-dropzone-inner">
               <span class="materials-dropzone-title">Drop files here or click to browse</span>
-              <span class="materials-dropzone-hint">PDF, PowerPoint (.pptx), text, or images — text is extracted into the box below</span>
+              <span class="materials-dropzone-hint">PDFs and slides are stored for this session — students use them as notes; nothing is dumped into a text box.</span>
             </div>
-            <textarea id="materials" placeholder="Paste notes or drop files above. Extracted text appears here…"></textarea>
+            <ul id="materialsFileList" class="materials-file-list"></ul>
+            <label class="field-label" for="materialsNotes" style="margin-top:0.75rem;">Additional notes <span style="font-weight:400;text-transform:none;letter-spacing:0;color:#C4C9D4">(optional)</span></label>
+            <textarea id="materialsNotes" placeholder="Extra context only — optional. Attached files above are the main notes."></textarea>
             <div id="materialsStatus" class="materials-status" aria-live="polite"></div>
           </div>
         </div>
