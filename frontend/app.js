@@ -10,7 +10,8 @@ const reflectionScreen  = document.getElementById("reflection-screen");
 const getStartedBtn     = document.getElementById("getStartedBtn");
 const topicSelect       = document.getElementById("topic");
 const customTopic       = document.getElementById("customTopic");
-const materialsEl         = document.getElementById("materials");
+const materialsNotesEl    = document.getElementById("materialsNotes");
+const materialsFileListEl = document.getElementById("materialsFileList");
 const materialsDropzone   = document.getElementById("materialsDropzone");
 const materialsFileInput  = document.getElementById("materialsFileInput");
 const materialsStatusEl   = document.getElementById("materialsStatus");
@@ -955,9 +956,39 @@ function disconnect(requestReflection = false) {
 
 async function connect() {
   lastError = null;
-  const topic         = getSelectedTopic();
-  const materials     = materialsEl.value.trim();
-  const useVideo      = useCameraEl.checked || (useWhiteboardEl && useWhiteboardEl.checked);
+  const topic = getSelectedTopic();
+  const materialsNotes = materialsNotesEl ? materialsNotesEl.value.trim() : "";
+  let materialsId = window.__materialsId || "";
+  // Persist notes into stored session so server can merge with file context
+  if (materialsId && materialsNotesEl) {
+    try {
+      await fetch(`${window.location.origin}/api/materials/${materialsId}/notes`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: materialsNotes }),
+      });
+    } catch (_) {}
+  }
+  // No uploads but user typed notes only — pass inline if short; else create session and save notes
+  if (!materialsId && materialsNotes && materialsNotes.length < 3000) {
+    // short notes only, no files
+  } else if (!materialsId && materialsNotes) {
+    try {
+      const r = await fetch(`${window.location.origin}/api/materials/session`, { method: "POST" });
+      const j = await r.json();
+      if (j.materialsId) {
+        materialsId = j.materialsId;
+        window.__materialsId = materialsId;
+        await fetch(`${window.location.origin}/api/materials/${materialsId}/notes`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ notes: materialsNotes }),
+        });
+      }
+    } catch (_) {}
+  }
+
+  const useVideo = useCameraEl.checked || (useWhiteboardEl && useWhiteboardEl.checked);
   const studentsParam = classroomMode ? Array.from(selectedStudents).join(",") : "";
 
   showSession(topic);
@@ -974,7 +1005,10 @@ async function connect() {
     + `&video=${useVideo ? "1" : "0"}`
     + `&classroom=${classroomMode ? "1" : "0"}`
     + (studentsParam ? `&students=${encodeURIComponent(studentsParam)}` : "")
-    + (materials     ? `&materials=${encodeURIComponent(materials)}`    : "");
+    + (materialsId ? `&materialsId=${encodeURIComponent(materialsId)}` : "")
+    + (!materialsId && materialsNotes && materialsNotes.length < 3000
+      ? `&materials=${encodeURIComponent(materialsNotes)}`
+      : "");
 
   ws = new WebSocket(url);
   ws.binaryType = "arraybuffer";
@@ -1165,37 +1199,76 @@ doneSpeakingBtn.addEventListener("click", () => {
   } catch (_) {}
 });
 
-// ── Study materials: drag-drop + extract ───────────────────────────────────────
+// ── Study materials: stored files + notes (context resolved server-side at session start) ──
 function setMaterialsStatus(msg, isError) {
   if (!materialsStatusEl) return;
   materialsStatusEl.textContent = msg || "";
   materialsStatusEl.classList.toggle("error", !!isError);
 }
 
-async function extractFileToMaterials(file) {
+async function ensureMaterialsSession() {
+  if (window.__materialsId) return window.__materialsId;
+  try {
+    const res = await fetch(`${window.location.origin}/api/materials/session`, { method: "POST" });
+    const data = await res.json();
+    if (data.materialsId) {
+      window.__materialsId = data.materialsId;
+      return data.materialsId;
+    }
+  } catch (_) {}
+  return null;
+}
+
+function renderMaterialsFileList(files) {
+  if (!materialsFileListEl) return;
+  materialsFileListEl.innerHTML = "";
+  if (!files || !files.length) return;
+  files.forEach((f) => {
+    const li = document.createElement("li");
+    li.className = "materials-file-item";
+    li.innerHTML = `<span class="materials-file-name">${escapeHtml(f.name)}</span>`;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "materials-file-remove";
+    btn.textContent = "Remove";
+    btn.addEventListener("click", async () => {
+      const id = window.__materialsId;
+      if (!id) return;
+      await fetch(`${window.location.origin}/api/materials/${id}/file/${f.storedName}`, {
+        method: "DELETE",
+      });
+      const r = await fetch(`${window.location.origin}/api/materials/${id}`);
+      const j = await r.json();
+      renderMaterialsFileList(j.files || []);
+    });
+    li.appendChild(btn);
+    materialsFileListEl.appendChild(li);
+  });
+}
+
+async function uploadFileToMaterialsSession(file) {
   if (!file) return;
-  setMaterialsStatus(`Extracting ${file.name}…`);
+  const id = await ensureMaterialsSession();
+  if (!id) {
+    setMaterialsStatus("Could not start materials session.", true);
+    return;
+  }
+  setMaterialsStatus(`Storing ${file.name}…`);
   try {
     const fd = new FormData();
+    fd.append("materialsId", id);
     fd.append("file", file);
-    const res = await fetch(`${window.location.origin}/api/materials/extract`, {
+    const res = await fetch(`${window.location.origin}/api/materials/upload`, {
       method: "POST",
       body: fd,
     });
     const data = await res.json();
     if (!res.ok) {
-      setMaterialsStatus(data.error || "Extraction failed", true);
+      setMaterialsStatus(data.error || "Upload failed", true);
       return;
     }
-    const block = data.text.trim()
-      ? `\n\n--- ${data.filename} ---\n${data.text.trim()}\n`
-      : "";
-    if (block) {
-      materialsEl.value = (materialsEl.value.trim() ? materialsEl.value.trim() + block : block.trim());
-      setMaterialsStatus(`Added ${data.filename}`);
-    } else {
-      setMaterialsStatus("No text extracted.", true);
-    }
+    renderMaterialsFileList(data.files || []);
+    setMaterialsStatus(`Attached: ${data.filename} — students will use it as notes.`);
   } catch (e) {
     setMaterialsStatus(e.message || "Upload failed", true);
   }
@@ -1203,18 +1276,27 @@ async function extractFileToMaterials(file) {
 
 function initMaterialsDropzone() {
   if (!materialsDropzone || !materialsFileInput) return;
+  ensureMaterialsSession().then((id) => {
+    if (id) {
+      fetch(`${window.location.origin}/api/materials/${id}`)
+        .then((r) => r.json())
+        .then((j) => renderMaterialsFileList(j.files || []))
+        .catch(() => {});
+    }
+  });
+
   const inner = materialsDropzone.querySelector(".materials-dropzone-inner");
   const openPicker = () => materialsFileInput.click();
   if (inner) {
     inner.addEventListener("click", (e) => {
-      if (e.target === materialsEl) return;
+      if (e.target === materialsNotesEl) return;
       openPicker();
     });
   }
   materialsFileInput.addEventListener("change", () => {
     const files = materialsFileInput.files;
     if (!files || !files.length) return;
-    Array.from(files).forEach(f => extractFileToMaterials(f));
+    Array.from(files).forEach((f) => uploadFileToMaterialsSession(f));
     materialsFileInput.value = "";
   });
   ["dragenter", "dragover"].forEach((ev) => {
@@ -1233,7 +1315,7 @@ function initMaterialsDropzone() {
   });
   materialsDropzone.addEventListener("drop", (e) => {
     const files = e.dataTransfer && e.dataTransfer.files;
-    if (files && files.length) Array.from(files).forEach(f => extractFileToMaterials(f));
+    if (files && files.length) Array.from(files).forEach((f) => uploadFileToMaterialsSession(f));
   });
 }
 
