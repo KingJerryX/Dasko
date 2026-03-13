@@ -1,69 +1,65 @@
 /**
- * Dasko — mic/camera capture, WebSocket proxy, audio playback, orb state engine.
+ * Dasko — Frontend: mic/camera, WebSocket, whiteboard, transcript, coaching, playback.
  */
 
-// ── DOM refs ───────────────────────────────────────────────────────────────────
-const landingScreen     = document.getElementById("landing-screen");
-const setupScreen       = document.getElementById("setup-screen");
-const sessionScreen     = document.getElementById("session-screen");
-const reflectionScreen  = document.getElementById("reflection-screen");
-const getStartedBtn     = document.getElementById("getStartedBtn");
-const topicSelect       = document.getElementById("topic");
-const customTopic       = document.getElementById("customTopic");
-const materialsNotesEl    = document.getElementById("materialsNotes");
-const materialsFileListEl = document.getElementById("materialsFileList");
-const materialsDropzone   = document.getElementById("materialsDropzone");
-const materialsFileInput  = document.getElementById("materialsFileInput");
-const materialsStatusEl   = document.getElementById("materialsStatus");
-const useCameraEl       = document.getElementById("useCamera");
-const useWhiteboardEl   = document.getElementById("useWhiteboard");
-const whiteboardCanvas  = document.getElementById("whiteboardCanvas");
-const wbPen             = document.getElementById("wbPen");
-const wbEraser          = document.getElementById("wbEraser");
-const wbText            = document.getElementById("wbText");
-const wbClear           = document.getElementById("wbClear");
-const wbColorsEl        = document.getElementById("wbColors");
-const startBtn          = document.getElementById("startBtn");
-const stopBtn           = document.getElementById("stopBtn");
-const muteBtn           = document.getElementById("muteBtn");
-const doneSpeakingBtn   = document.getElementById("doneSpeakingBtn");
-const statusEl          = document.getElementById("status");
+// ── DOM refs ─────────────────────────────────────────────────────────────────
+const landingScreen   = document.getElementById("landing-screen");
+const setupScreen     = document.getElementById("setup-screen");
+const sessionScreen   = document.getElementById("session-screen");
+const reflectionScreen = document.getElementById("reflection-screen");
+const getStartedBtn   = document.getElementById("getStartedBtn");
+const topicSelect     = document.getElementById("topic");
+const customTopic     = document.getElementById("customTopic");
+const materialsEl     = document.getElementById("materials");
+const useCameraEl     = document.getElementById("useCamera");
+const useWhiteboardEl = document.getElementById("useWhiteboard");
+const startBtn        = document.getElementById("startBtn");
+const stopBtn         = document.getElementById("stopBtn");
+const muteBtn         = document.getElementById("muteBtn");
+const doneSpeakingBtn = document.getElementById("doneSpeakingBtn");
+const camToggleBtn    = document.getElementById("camToggleBtn");
+const wbToggleBtn     = document.getElementById("wbToggleBtn");
 const sessionTopicLabel = document.getElementById("sessionTopicLabel");
-const modeTabSolo       = document.getElementById("modeTabSolo");
-const modeTabClassroom  = document.getElementById("modeTabClassroom");
-const soloSection       = document.getElementById("soloSection");
-const classroomSection  = document.getElementById("classroomSection");
-const studentHint       = document.getElementById("studentHint");
-const orb               = document.getElementById("orb");
-const orbWrap           = document.getElementById("orbWrap");
-const orbLabel          = document.getElementById("orbLabel");
-const speakerLabel      = document.getElementById("speakerLabel");
-const orbPillDot        = document.getElementById("orbPillDot");
-const orbPillLabel      = document.getElementById("orbPillLabel");
-const micDot            = document.getElementById("micDot");
-const micLabel          = document.getElementById("micLabel");
-const chatInput         = document.getElementById("chatInput");
-const chatSendBtn       = document.getElementById("chatSendBtn");
-const cameraFeed        = document.getElementById("cameraFeed");
+const sessionTimer    = document.getElementById("sessionTimer");
+const statusDot       = document.getElementById("statusDot");
+const statusText      = document.getElementById("statusText");
+const modeTabSolo     = document.getElementById("modeTabSolo");
+const modeTabClassroom = document.getElementById("modeTabClassroom");
+const soloSection     = document.getElementById("soloSection");
+const classroomSection = document.getElementById("classroomSection");
+const studentHint     = document.getElementById("studentHint");
+const orb             = document.getElementById("orb");
+const orbWrap         = document.getElementById("orbWrap");
+const orbLabel        = document.getElementById("orbLabel");
+const speakerLabel    = document.getElementById("speakerLabel");
+const orbArea         = document.getElementById("orbArea");
+const orbPill         = document.getElementById("orbPill");
+const orbPillDot      = document.getElementById("orbPillDot");
+const orbPillLabel    = document.getElementById("orbPillLabel");
+const micDot          = document.getElementById("micDot");
+const micLabel        = document.getElementById("micLabel");
+const chatInput       = document.getElementById("chatInput");
+const chatSendBtn     = document.getElementById("chatSendBtn");
+const mediaContainer  = document.getElementById("mediaContainer");
+const whiteboardCanvas = document.getElementById("whiteboardCanvas");
+const cameraFeed      = document.getElementById("cameraFeed");
+const cameraContainer = document.getElementById("cameraContainer");
+const cameraPipFeed   = document.getElementById("cameraPipFeed");
+const screenContainer = document.getElementById("screenContainer");
+const screenFeed      = document.getElementById("screenFeed");
+const screenToggleBtn = document.getElementById("screenToggleBtn");
+const wbToolbar       = document.getElementById("wbToolbar");
+const transcriptBody  = document.getElementById("transcriptBody");
+const coachingBody    = document.getElementById("coachingBody");
+const reflectionSummary    = document.getElementById("reflectionSummary");
+const reflectionStrengths  = document.getElementById("reflectionStrengths");
+const reflectionGaps       = document.getElementById("reflectionGaps");
+const reflectionQuestions  = document.getElementById("reflectionQuestions");
+const reflectionImprovements = document.getElementById("reflectionImprovements");
+const teachAgainBtn   = document.getElementById("teachAgainBtn");
+const changeTopicBtn  = document.getElementById("changeTopicBtn");
 
-// Panels
-const transcriptBody    = document.getElementById("transcriptBody");
-const coachingBody      = document.getElementById("coachingBody");
-const coachingEmpty     = document.getElementById("coachingEmpty");
-
-// Reflection
-const reflLoading           = document.getElementById("reflLoading");
-const reflContent           = document.getElementById("reflContent");
-const reflTopicBadge        = document.getElementById("reflTopicBadge");
-const reflSummary           = document.getElementById("reflSummary");
-const reflStrengths         = document.getElementById("reflStrengths");
-const reflGaps              = document.getElementById("reflGaps");
-const reflQuestions         = document.getElementById("reflQuestions");
-const reflImprovements      = document.getElementById("reflImprovements");
-const reflTeachAgainBtn     = document.getElementById("reflTeachAgainBtn");
-const reflNewTopicBtn       = document.getElementById("reflNewTopicBtn");
-
-// ── Student roster ─────────────────────────────────────────────────────────────
+// ── Student roster ───────────────────────────────────────────────────────────
 const STUDENTS = {
   emma:   { name: "Emma",   color: "#93C5FD", glow: "rgba(147,197,253,0.5)" },
   marcus: { name: "Marcus", color: "#FDA4AF", glow: "rgba(253,164,175,0.5)" },
@@ -73,92 +69,162 @@ const STUDENTS = {
   zoe:    { name: "Zoe",    color: "#FBBF24", glow: "rgba(251,191,36,0.5)"  },
 };
 
-// ── Mode & selection state ─────────────────────────────────────────────────────
+const ORB_STATES = {
+  idle:      { color: "#9CA3AF", glow: "rgba(156,163,175,0.4)", speed: "3.5s",  rings: false, label: "" },
+  listening: { color: "#93C5FD", glow: "rgba(147,197,253,0.45)", speed: "2.2s",  rings: false, label: "Listening\u2026" },
+  thinking:  { color: "#C4B5FD", glow: "rgba(196,181,253,0.5)",  speed: "2.6s",  rings: false, label: "Thinking\u2026" },
+  speaking:  { color: "#FF7355", glow: "rgba(255,115,85,0.5)",   speed: "0.85s", rings: true,  label: "Speaking\u2026" },
+  curious:   { color: "#FBBF24", glow: "rgba(251,191,36,0.45)",  speed: "1.6s",  rings: false, label: "Curious!" },
+  confused:  { color: "#FDA4AF", glow: "rgba(253,164,175,0.45)", speed: "2.9s",  rings: false, label: "Hmm\u2026" },
+  excited:   { color: "#FF7355", glow: "rgba(255,115,85,0.65)",  speed: "0.65s", rings: true,  label: "Excited!" },
+};
+
+const SERVER_EMOTION_STATES = new Set(["curious", "confused", "excited", "listening", "thinking"]);
+
+// ── State ────────────────────────────────────────────────────────────────────
 let classroomMode    = false;
 let selectedPersona  = "eager";
 let selectedStudents = new Set();
 
-// ── Startup tone & button sounds ───────────────────────────────────────────────
-let _startupAudioContext = null;
-let _startupTonePlayed   = false;
+let ws               = null;
+let lastError        = null;
+let micStream        = null;
+let micContext       = null;
+let micProcessor     = null;
+let micMuted         = false;
+let cameraStream     = null;
+let cameraEnabled    = false;
+let screenStream     = null;
+let screenEnabled    = false;
+let whiteboardEnabled = false;
+let whiteboardInited = false;
+let playbackContext  = null;
+let playbackGainNode = null;
+let nextPlayTime     = 0;
+let audioChunksReceived = 0;
+let currentOrbState  = "idle";
+let activeSpeakerName = "";
+let awaitingReflection = false;
 
-function getAudioContext() {
-  if (!_startupAudioContext) _startupAudioContext = new (window.AudioContext || window.webkitAudioContext)();
-  return _startupAudioContext;
+// Audio config
+const SEND_SAMPLE_RATE        = 16000;
+const RECV_SAMPLE_RATE        = 24000;
+const BUFFER_SIZE             = 2048;
+const SILENCE_BUFFERS_BEFORE_END = 18;
+const SPEECH_ENERGY_THRESHOLD = 0.006;
+
+let vadInSpeech     = false;
+let vadSilenceCount = 0;
+let teacherSpeechEnded = false;
+
+// Whiteboard
+let currentTool  = "pen";
+let currentColor = "#000000";
+let canvasDirty  = false;
+let wbDrawing    = false;
+let wbLastX = 0, wbLastY = 0;
+
+// Frame sending
+let frameInterval   = null;
+const compositeCanvas = document.createElement("canvas");
+compositeCanvas.width = 640;
+compositeCanvas.height = 360;
+
+// Transcript
+let transcriptEntryId = 0;
+let currentTeacherEntry = null;
+let currentStudentEntry = null;
+
+// Session state
+let sessionTopic     = "";
+let sessionMaterials = "";
+let sessionStartTime = 0;
+let sessionDuration  = 0;
+let timerInterval    = null;
+
+// File uploads
+const fileDropZone = document.getElementById("fileDropZone");
+const fileInput    = document.getElementById("fileInput");
+let uploadedFiles  = []; // { name, mimeType, base64, size }
+
+// Firebase
+let db = null;
+
+// ── Startup tone & sounds ────────────────────────────────────────────────────
+let _audioCtx = null;
+let _startupPlayed = false;
+
+function getAudioCtx() {
+  if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return _audioCtx;
 }
 
 function playStartupTone() {
-  if (_startupTonePlayed) return;
-  const ctx = getAudioContext();
+  if (_startupPlayed) return;
+  const ctx = getAudioCtx();
   const run = () => {
-    if (_startupTonePlayed) return;
-    try {
-      if (ctx.state !== "running") return;
-      _startupTonePlayed = true;
-      const duration = 1.7;
-      const baseFreq  = 196;
-      const gainNode  = ctx.createGain();
-      gainNode.gain.setValueAtTime(0, ctx.currentTime);
-      gainNode.gain.linearRampToValueAtTime(0.38, ctx.currentTime + 0.04);
-      gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
-      gainNode.connect(ctx.destination);
-      const o1 = ctx.createOscillator(); o1.type = "sine";
-      o1.frequency.setValueAtTime(baseFreq, ctx.currentTime);
-      o1.frequency.linearRampToValueAtTime(baseFreq * 1.02, ctx.currentTime + duration * 0.5);
-      o1.connect(gainNode); o1.start(ctx.currentTime); o1.stop(ctx.currentTime + duration);
-      const o2 = ctx.createOscillator(); o2.type = "sine";
-      o2.frequency.setValueAtTime(baseFreq * 1.006, ctx.currentTime);
-      o2.frequency.linearRampToValueAtTime(baseFreq * 1.024, ctx.currentTime + duration * 0.5);
-      o2.connect(gainNode); o2.start(ctx.currentTime); o2.stop(ctx.currentTime + duration);
-      const o3 = ctx.createOscillator(); o3.type = "sine";
-      o3.frequency.setValueAtTime(baseFreq * 2.48, ctx.currentTime);
-      const g3 = ctx.createGain();
-      g3.gain.setValueAtTime(0.22, ctx.currentTime);
-      g3.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration * 0.6);
-      o3.connect(g3); g3.connect(gainNode); o3.start(ctx.currentTime); o3.stop(ctx.currentTime + duration);
-    } catch (_) {}
+    if (_startupPlayed) return;
+    if (ctx.state !== "running") return;
+    _startupPlayed = true;
+    const dur = 1.7, freq = 196, t = ctx.currentTime;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.38, t + 0.04);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    g.connect(ctx.destination);
+    [1, 1.006, 2.48].forEach((mult, i) => {
+      const o = ctx.createOscillator();
+      o.type = "sine";
+      o.frequency.setValueAtTime(freq * mult, t);
+      if (i < 2) {
+        o.frequency.linearRampToValueAtTime(freq * mult * 1.02, t + dur * 0.5);
+        o.connect(g);
+      } else {
+        const g3 = ctx.createGain();
+        g3.gain.setValueAtTime(0.22, t);
+        g3.gain.exponentialRampToValueAtTime(0.001, t + dur * 0.6);
+        o.connect(g3); g3.connect(g);
+      }
+      o.start(t); o.stop(t + dur);
+    });
   };
-  if (ctx.state === "suspended") ctx.resume().then(run).catch(() => {});
-  else run();
+  if (ctx.state === "suspended") ctx.resume().then(run); else run();
 }
 
 function playButtonSound(type) {
   try {
-    const ctx = getAudioContext();
+    const ctx = getAudioCtx();
     if (ctx.state === "suspended") return;
     const t = ctx.currentTime;
-    const gainNode = ctx.createGain();
-    gainNode.connect(ctx.destination);
+    const g = ctx.createGain();
+    g.connect(ctx.destination);
     if (type === "confirm") {
-      gainNode.gain.setValueAtTime(0, t);
-      gainNode.gain.linearRampToValueAtTime(0.2, t + 0.02);
-      gainNode.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
-      const o1 = ctx.createOscillator(); o1.type = "sine";
-      o1.frequency.setValueAtTime(320, t); o1.frequency.linearRampToValueAtTime(400, t + 0.12);
-      o1.connect(gainNode); o1.start(t); o1.stop(t + 0.28);
-      const o2 = ctx.createOscillator(); o2.type = "sine";
-      o2.frequency.setValueAtTime(324, t); o2.frequency.linearRampToValueAtTime(404, t + 0.12);
-      o2.connect(gainNode); o2.start(t); o2.stop(t + 0.28);
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.2, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+      [320, 324].forEach(f => {
+        const o = ctx.createOscillator(); o.type = "sine";
+        o.frequency.setValueAtTime(f, t);
+        o.frequency.linearRampToValueAtTime(f + 80, t + 0.12);
+        o.connect(g); o.start(t); o.stop(t + 0.28);
+      });
     } else {
-      gainNode.gain.setValueAtTime(0, t);
-      gainNode.gain.linearRampToValueAtTime(0.15, t + 0.015);
-      gainNode.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.15, t + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
       const o = ctx.createOscillator(); o.type = "sine";
-      o.frequency.setValueAtTime(220, t); o.frequency.exponentialRampToValueAtTime(180, t + 0.22);
-      o.connect(gainNode); o.start(t); o.stop(t + 0.22);
+      o.frequency.setValueAtTime(220, t);
+      o.frequency.exponentialRampToValueAtTime(180, t + 0.22);
+      o.connect(g); o.start(t); o.stop(t + 0.22);
     }
   } catch (_) {}
 }
 
-function onFirstInteraction() {
-  if (_startupTonePlayed) return;
-  playStartupTone();
-}
-["click", "touchstart", "keydown"].forEach(ev =>
-  document.addEventListener(ev, onFirstInteraction, { once: true, capture: true })
-);
+["click", "touchstart", "keydown"].forEach(ev => {
+  document.addEventListener(ev, () => { if (!_startupPlayed) playStartupTone(); }, { once: true, capture: true });
+});
 
-// ── Landing → Setup ────────────────────────────────────────────────────────────
+// ── Landing → Setup ──────────────────────────────────────────────────────────
 getStartedBtn.addEventListener("click", () => {
   playButtonSound("confirm");
   landingScreen.classList.add("fade-out");
@@ -171,21 +237,26 @@ getStartedBtn.addEventListener("click", () => {
   }, 280);
 });
 
-// ── Mode tabs ──────────────────────────────────────────────────────────────────
+// ── Mode tabs ────────────────────────────────────────────────────────────────
 modeTabSolo.addEventListener("click", () => {
   classroomMode = false;
-  modeTabSolo.classList.add("active"); modeTabClassroom.classList.remove("active");
-  soloSection.style.display = "block"; classroomSection.style.display = "none";
-  updateStartButton();
-});
-modeTabClassroom.addEventListener("click", () => {
-  classroomMode = true;
-  modeTabClassroom.classList.add("active"); modeTabSolo.classList.remove("active");
-  soloSection.style.display = "none"; classroomSection.style.display = "block";
+  modeTabSolo.classList.add("active");
+  modeTabClassroom.classList.remove("active");
+  soloSection.style.display = "block";
+  classroomSection.style.display = "none";
   updateStartButton();
 });
 
-// ── Persona selection ──────────────────────────────────────────────────────────
+modeTabClassroom.addEventListener("click", () => {
+  classroomMode = true;
+  modeTabClassroom.classList.add("active");
+  modeTabSolo.classList.remove("active");
+  soloSection.style.display = "none";
+  classroomSection.style.display = "block";
+  updateStartButton();
+});
+
+// ── Persona selection ────────────────────────────────────────────────────────
 document.querySelectorAll(".persona-card").forEach(card => {
   card.addEventListener("click", () => {
     document.querySelectorAll(".persona-card").forEach(c => c.classList.remove("selected"));
@@ -194,11 +265,10 @@ document.querySelectorAll(".persona-card").forEach(card => {
   });
 });
 
-// ── Student selection ──────────────────────────────────────────────────────────
+// ── Student selection (classroom) ────────────────────────────────────────────
 document.querySelectorAll(".student-card").forEach(card => {
   card.addEventListener("click", () => {
-    const id    = card.dataset.student;
-    const color = card.dataset.color;
+    const id = card.dataset.student, color = card.dataset.color;
     if (selectedStudents.has(id)) {
       selectedStudents.delete(id);
       card.classList.remove("selected");
@@ -213,50 +283,170 @@ document.querySelectorAll(".student-card").forEach(card => {
 });
 
 function updateStartButton() {
-  if (!classroomMode) {
-    startBtn.disabled = false;
-    startBtn.textContent = "Start teaching";
-    return;
-  }
+  if (!classroomMode) { startBtn.disabled = false; startBtn.textContent = "Start teaching"; return; }
   const n = selectedStudents.size;
   startBtn.disabled = n < 2;
-  if      (n === 0) { startBtn.textContent = "Select 2–4 students";            studentHint.textContent = "Select 2–4"; }
-  else if (n === 1) { startBtn.textContent = "Select 1 more student";           studentHint.textContent = "1 selected — need 1 more"; }
-  else              { startBtn.textContent = `Start teaching (${n} students)`;  studentHint.textContent = `${n} selected`; }
+  if      (n === 0) { startBtn.textContent = "Select 2\u20134 students";        studentHint.textContent = "Select 2\u20134"; }
+  else if (n === 1) { startBtn.textContent = "Select 1 more student";           studentHint.textContent = "1 selected"; }
+  else              { startBtn.textContent = `Start teaching (${n} students)`;   studentHint.textContent = `${n} selected`; }
 }
 
-// ── Topic loading ──────────────────────────────────────────────────────────────
-function escapeHtml(s) {
-  const d = document.createElement("div"); d.textContent = s; return d.innerHTML;
-}
+// ── Topic loading ────────────────────────────────────────────────────────────
+function escapeHtml(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
 
 async function loadTopics() {
   try {
-    const res  = await fetch(`${window.location.origin}/api/topics`);
+    const res = await fetch(`${location.origin}/api/topics`);
     const data = await res.json();
     topicSelect.innerHTML = data.topics.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
-  } catch {
-    topicSelect.innerHTML = '<option value="">Could not load topics</option>';
-  }
+  } catch { topicSelect.innerHTML = '<option value="">Could not load topics</option>'; }
 }
 
 function getSelectedTopic() {
-  return customTopic.value.trim() || topicSelect.value || "the topic the teacher will explain";
+  return customTopic.value.trim() || topicSelect.value || "the topic";
 }
 
-// ── Orb state machine ──────────────────────────────────────────────────────────
-const ORB_STATES = {
-  idle:      { color: "#EBEBEB", glow: "rgba(235,235,235,0.5)",  speed: "3.5s",  rings: false, label: "" },
-  listening: { color: "#93C5FD", glow: "rgba(147,197,253,0.45)", speed: "2.2s",  rings: false, label: "Listening…" },
-  thinking:  { color: "#C4B5FD", glow: "rgba(196,181,253,0.5)",  speed: "2.6s",  rings: false, label: "Thinking…" },
-  speaking:  { color: "#FF7355", glow: "rgba(255,115,85,0.5)",   speed: "0.85s", rings: true,  label: "Speaking…" },
-  curious:   { color: "#FBBF24", glow: "rgba(251,191,36,0.45)",  speed: "1.6s",  rings: false, label: "Curious!" },
-  confused:  { color: "#FDA4AF", glow: "rgba(253,164,175,0.45)", speed: "2.9s",  rings: false, label: "Hmm…" },
-  excited:   { color: "#FF7355", glow: "rgba(255,115,85,0.65)",  speed: "0.65s", rings: true,  label: "Excited!" },
-};
+// ── File upload handling ──────────────────────────────────────────────────────
+const ACCEPTED_TYPES = new Set([
+  "application/pdf",
+  "image/png", "image/jpeg", "image/gif", "image/webp",
+  "text/plain", "text/markdown", "text/csv",
+]);
+const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
 
-let currentOrbState = "idle";
+function getFileIcon(mimeType) {
+  if (mimeType === "application/pdf") return "\u{1F4C4}";
+  if (mimeType.startsWith("image/"))  return "\u{1F5BC}";
+  return "\u{1F4DD}";
+}
 
+function formatFileSize(bytes) {
+  if (bytes < 1024)           return bytes + " B";
+  if (bytes < 1024 * 1024)    return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+function renderFileList() {
+  const zone = fileDropZone;
+  const existing = zone.querySelector(".file-list");
+  if (existing) existing.remove();
+  const existingIcon  = zone.querySelector(".file-drop-icon");
+  const existingLabel = zone.querySelector(".file-drop-label");
+  const existingAdd   = zone.querySelector(".file-drop-add-more");
+  if (existingAdd) existingAdd.remove();
+
+  if (uploadedFiles.length === 0) {
+    zone.classList.remove("has-files");
+    if (existingIcon)  existingIcon.style.display = "";
+    if (existingLabel) existingLabel.style.display = "";
+    return;
+  }
+
+  zone.classList.add("has-files");
+  if (existingIcon)  existingIcon.style.display = "none";
+  if (existingLabel) existingLabel.style.display = "none";
+
+  const list = document.createElement("div");
+  list.className = "file-list";
+
+  uploadedFiles.forEach((file, idx) => {
+    const item = document.createElement("div");
+    item.className = "file-item";
+    item.innerHTML = `
+      <span class="file-item-icon">${getFileIcon(file.mimeType)}</span>
+      <span class="file-item-name">${escapeHtml(file.name)}</span>
+      <span class="file-item-size">${formatFileSize(file.size)}</span>
+    `;
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "file-item-remove";
+    removeBtn.textContent = "\u2715";
+    removeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      uploadedFiles.splice(idx, 1);
+      renderFileList();
+    });
+    item.appendChild(removeBtn);
+    list.appendChild(item);
+  });
+
+  zone.appendChild(list);
+
+  const addMore = document.createElement("button");
+  addMore.className = "file-drop-add-more";
+  addMore.textContent = "+ Add more files";
+  addMore.addEventListener("click", (e) => { e.stopPropagation(); fileInput.click(); });
+  zone.appendChild(addMore);
+}
+
+async function processFiles(files) {
+  for (const file of files) {
+    // Determine mime type (handle common extensions for unknown types)
+    let mimeType = file.type;
+    if (!mimeType) {
+      const ext = file.name.split(".").pop().toLowerCase();
+      if (ext === "md") mimeType = "text/markdown";
+      else if (ext === "txt") mimeType = "text/plain";
+      else if (ext === "csv") mimeType = "text/csv";
+      else if (ext === "pdf") mimeType = "application/pdf";
+    }
+
+    if (!ACCEPTED_TYPES.has(mimeType)) {
+      // Try to handle docx/doc as text extraction
+      if (file.name.match(/\.(doc|docx)$/i)) {
+        // Read as text best-effort
+        try {
+          const text = await file.text();
+          uploadedFiles.push({ name: file.name, mimeType: "text/plain", base64: btoa(unescape(encodeURIComponent(text))), size: file.size });
+        } catch (_) {}
+        continue;
+      }
+      continue; // Skip unsupported types
+    }
+
+    if (file.size > MAX_FILE_SIZE) continue;
+
+    // Prevent duplicates
+    if (uploadedFiles.some(f => f.name === file.name && f.size === file.size)) continue;
+
+    const base64 = await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(",")[1]);
+      reader.readAsDataURL(file);
+    });
+
+    uploadedFiles.push({ name: file.name, mimeType, base64, size: file.size });
+  }
+  renderFileList();
+}
+
+// Drop zone events
+fileDropZone.addEventListener("click", () => fileInput.click());
+
+fileInput.addEventListener("change", () => {
+  if (fileInput.files.length) processFiles(Array.from(fileInput.files));
+  fileInput.value = ""; // Reset so same file can be re-added
+});
+
+fileDropZone.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  fileDropZone.classList.add("drag-over");
+});
+
+fileDropZone.addEventListener("dragleave", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  fileDropZone.classList.remove("drag-over");
+});
+
+fileDropZone.addEventListener("drop", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  fileDropZone.classList.remove("drag-over");
+  if (e.dataTransfer.files.length) processFiles(Array.from(e.dataTransfer.files));
+});
+
+// ── Orb state machine ────────────────────────────────────────────────────────
 function applyOrbColor(color, glow) {
   orb.style.setProperty("--orb-color", color);
   orb.style.setProperty("--orb-glow",  glow);
@@ -274,7 +464,7 @@ function setOrbState(name) {
   orbPillDot.style.setProperty("--orb-speed", s.speed);
   orb.style.animation = "none"; void orb.offsetWidth; orb.style.animation = "";
   orbWrap.classList.toggle("rings-on", s.rings);
-  orbLabel.textContent     = s.label;
+  orbLabel.textContent = s.label;
   orbPillLabel.textContent = s.label;
 }
 
@@ -286,7 +476,7 @@ function setSpeaker(name) {
   speakerLabel.style.color = student.color;
 }
 
-// ── Classroom orb management ───────────────────────────────────────────────────
+// ── Classroom orbs ───────────────────────────────────────────────────────────
 function createClassroomOrbs() {
   const container = document.getElementById("classroomOrbs");
   container.innerHTML = "";
@@ -312,15 +502,10 @@ function activateStudentOrb(id) {
     const name   = document.getElementById(`orb-name-${sid}`);
     const rings  = document.getElementById(`orb-rings-${sid}`);
     if (!circle) continue;
-    if (sid === id) {
-      circle.classList.remove("idle"); circle.classList.add("speaking");
-      name.classList.remove("idle");   name.classList.add("speaking");
-      rings.classList.add("speaking");
-    } else {
-      circle.classList.remove("speaking"); circle.classList.add("idle");
-      name.classList.remove("speaking");   name.classList.add("idle");
-      rings.classList.remove("speaking");
-    }
+    const active = sid === id;
+    circle.classList.toggle("speaking", active); circle.classList.toggle("idle", !active);
+    name.classList.toggle("speaking", active);   name.classList.toggle("idle", !active);
+    rings.classList.toggle("speaking", active);
   }
 }
 
@@ -334,450 +519,19 @@ function deactivateStudentOrb(id) {
   rings.classList.remove("speaking");
 }
 
-const SERVER_EMOTION_STATES = new Set(["curious", "confused", "excited", "listening", "thinking"]);
-
-// ── Transcript panel ───────────────────────────────────────────────────────────
-let transcriptInitialised = false;
-let currentTeacherEntry   = null; // accumulate teacher speech chunks
-let currentStudentEntry   = null;
-
-function ensureTranscriptReady() {
-  if (!transcriptInitialised) {
-    transcriptBody.innerHTML = "";
-    transcriptInitialised = true;
-  }
-}
-
-function addTranscriptEntry(role, label, color, text) {
-  ensureTranscriptReady();
-  const entry = document.createElement("div");
-  entry.className = `tx-entry tx-${role}`;
-  const labelEl = document.createElement("div");
-  labelEl.className = "tx-label";
-  if (color) labelEl.style.color = color;
-  labelEl.textContent = label;
-  const textEl = document.createElement("div");
-  textEl.className = "tx-text";
-  textEl.textContent = text;
-  entry.appendChild(labelEl);
-  entry.appendChild(textEl);
-  transcriptBody.appendChild(entry);
-  transcriptBody.scrollTop = transcriptBody.scrollHeight;
-  return textEl;
-}
-
-/** Join ASR chunks without double spaces or missing spaces between words. */
-function joinTranscriptChunk(existing, chunk) {
-  if (!chunk) return existing || "";
-  const c = String(chunk).replace(/\s+/g, " ").trim();
-  if (!c) return existing || "";
-  if (!existing) return c;
-  const last = existing.slice(-1);
-  const first = c[0];
-  // No space before punctuation; space after word before word
-  if (/^[,;:.!?]/.test(c)) return existing + c;
-  if (last === " " || first === " ") return existing + c;
-  if (/[\s\-—]$/.test(last)) return existing + c;
-  return existing + " " + c;
-}
-
-/** When true, browser SpeechRecognition drives the teacher line; ignore Live ASR chunks (often garbled). */
-let browserTranscriptActive = false;
-let speechRecognition     = null;
-
-function appendTeacherTranscript(chunk) {
-  if (browserTranscriptActive) return; // Web Speech API is authoritative when available
-  ensureTranscriptReady();
-  if (!currentTeacherEntry) {
-    currentTeacherEntry = addTranscriptEntry("teacher", "You", null, joinTranscriptChunk("", chunk));
-  } else {
-    currentTeacherEntry.textContent = joinTranscriptChunk(currentTeacherEntry.textContent, chunk);
-    transcriptBody.scrollTop = transcriptBody.scrollHeight;
-  }
-}
-
-// Fix raw ASR output: capitalize first letter, ensure ending punctuation.
-function normalizeTranscript(text) {
-  if (!text) return text;
-  text = text.trim();
-  text = text.charAt(0).toUpperCase() + text.slice(1);
-  if (text.length > 0 && !/[.!?…]$/.test(text)) text += '.';
-  return text;
-}
-
-// Async: calls server to fix ASR errors using topic context, then patches the DOM node.
-async function cleanupTranscriptEntry(el) {
-  if (!el || !el.isConnected) return;
-  const raw = el.textContent;
-  if (!raw || raw.length < 8) return;
-  try {
-    const res = await fetch('/api/cleanup-transcript', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: raw, topic: getSelectedTopic() }),
-    });
-    if (!res.ok) return;
-    const { cleaned } = await res.json();
-    if (cleaned && cleaned.length > 2 && el.isConnected) {
-      el.textContent = cleaned;
-    }
-  } catch (_) {}
-}
-
-function appendTeacherTranscriptFromBrowser(chunk) {
-  if (!chunk || !String(chunk).trim()) return;
-  ensureTranscriptReady();
-  if (!currentTeacherEntry) {
-    currentTeacherEntry = addTranscriptEntry("teacher", "You", null, String(chunk).trim());
-  } else {
-    currentTeacherEntry.textContent = joinTranscriptChunk(currentTeacherEntry.textContent, chunk);
-    transcriptBody.scrollTop = transcriptBody.scrollHeight;
-  }
-}
-
-function startBrowserSpeechRecognition() {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR || speechRecognition) return;
-  try {
-    speechRecognition = new SR();
-    speechRecognition.continuous = true;
-    speechRecognition.interimResults = true;
-    speechRecognition.lang = navigator.language || "en-US";
-    speechRecognition.onresult = (e) => {
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) {
-          const t = e.results[i][0].transcript;
-          if (t && t.trim()) appendTeacherTranscriptFromBrowser(t);
-        }
-      }
-    };
-    speechRecognition.onerror = () => { /* ignore transient errors */ };
-    speechRecognition.onend = () => {
-      if (ws && ws.readyState === WebSocket.OPEN && speechRecognition) {
-        try { speechRecognition.start(); } catch (_) {}
-      }
-    };
-    speechRecognition.start();
-    browserTranscriptActive = true;
-  } catch (_) {
-    speechRecognition = null;
-    browserTranscriptActive = false;
-  }
-}
-
-function stopBrowserSpeechRecognition() {
-  browserTranscriptActive = false;
-  if (speechRecognition) {
-    try { speechRecognition.stop(); } catch (_) {}
-    speechRecognition = null;
-  }
-}
-
-function finalizeTeacherTranscript() {
-  const el = currentTeacherEntry;
-  currentTeacherEntry = null;
-  if (el) {
-    el.textContent = normalizeTranscript(el.textContent.replace(/\s+/g, " ").trim());
-    cleanupTranscriptEntry(el);
-  }
-}
-
-function appendStudentTranscript(chunk, name, color) {
-  ensureTranscriptReady();
-  if (!currentStudentEntry) {
-    currentStudentEntry = addTranscriptEntry("student", name, color, chunk);
-  } else {
-    currentStudentEntry.textContent = joinTranscriptChunk(currentStudentEntry.textContent, chunk);
-    transcriptBody.scrollTop = transcriptBody.scrollHeight;
-  }
-}
-
-function finalizeStudentTranscript() {
-  const el = currentStudentEntry;
-  currentStudentEntry = null;
-  if (el) {
-    el.textContent = normalizeTranscript(el.textContent);
-    cleanupTranscriptEntry(el); // async background fix
-  }
-}
-
-function resetTranscript() {
-  transcriptBody.innerHTML = '<p class="panel-empty">Transcript will appear here as you speak…</p>';
-  transcriptInitialised = false;
-  currentTeacherEntry   = null;
-  currentStudentEntry   = null;
-}
-
-// ── Coaching tips panel ────────────────────────────────────────────────────────
-let tipCount = 0;
-
-// Convert **text** markdown bold to <strong> tags (no other HTML allowed).
-function parseBoldMarkdown(text) {
-  // Escape any existing HTML first
-  const escaped = text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-  // Then convert **...** to <strong>...</strong>
-  return escaped.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-}
-
-function addCoachingTip(tip) {
-  const emptyEl = document.getElementById("coachingEmpty");
-  if (emptyEl) emptyEl.remove();
-  tipCount++;
-
-  // Fade existing tips
-  coachingBody.querySelectorAll(".tip-card").forEach(c => {
-    if (!c.classList.contains("tip-stale")) c.classList.add("tip-stale");
-  });
-
-  // Add new tip at top
-  const card = document.createElement("div");
-  card.className = "tip-card";
-  card.innerHTML = parseBoldMarkdown(tip);
-  coachingBody.insertBefore(card, coachingBody.firstChild);
-
-  // Keep max 5 tips
-  const all = coachingBody.querySelectorAll(".tip-card");
-  if (all.length > 5) all[all.length - 1].remove();
-}
-
-function resetCoachingPanel() {
-  tipCount = 0;
-  coachingBody.innerHTML = '<p class="panel-empty" id="coachingEmpty">Feedback will appear as you teach…</p>';
-}
-
-// ── Reflection screen ──────────────────────────────────────────────────────────
-function showReflection(topic, data) {
-  sessionScreen.style.display = "none";
-
-  reflTopicBadge.textContent = topic;
-  reflSummary.textContent    = data.summary || "";
-
-  function fillList(el, items, fallback) {
-    el.innerHTML = "";
-    if (!items || items.length === 0) {
-      const p = document.createElement("p"); p.className = "refl-none"; p.textContent = fallback;
-      el.appendChild(p);
-      return;
-    }
-    items.forEach(item => {
-      const li = document.createElement("li"); li.textContent = item;
-      el.appendChild(li);
-    });
-  }
-
-  fillList(reflStrengths,    data.strengths,    "Nothing noted.");
-  fillList(reflGaps,         data.gaps,         "No obvious gaps — well covered!");
-  fillList(reflQuestions,    data.topQuestions, "No notable questions recorded.");
-  fillList(reflImprovements, data.improvements, "Keep it up!");
-
-  reflLoading.style.display  = "none";
-  reflContent.style.display  = "flex";
-  reflectionScreen.style.display = "block";
-}
-
-function showReflectionLoading(topic) {
-  reflTopicBadge.textContent    = topic;
-  reflLoading.style.display     = "flex";
-  reflContent.style.display     = "none";
-  reflectionScreen.style.display = "block";
-  sessionScreen.style.display   = "none";
-}
-
-reflTeachAgainBtn.addEventListener("click", () => {
-  reflectionScreen.style.display = "none";
-  // Keep topic, go straight to session
-  startBtn.click();
-});
-
-reflNewTopicBtn.addEventListener("click", () => {
-  reflectionScreen.style.display = "none";
-  setupScreen.style.display = "flex";
-});
-
-// ── Mic indicator ──────────────────────────────────────────────────────────────
+// ── Mic & status ─────────────────────────────────────────────────────────────
 function setMicActive(active) {
   micDot.classList.toggle("active", active);
   micLabel.classList.toggle("active", active);
   micLabel.textContent = active ? "mic on" : "mic off";
 }
 
-// ── Status ─────────────────────────────────────────────────────────────────────
-function setStatus(msg, type = "") {
-  statusEl.textContent = msg;
-  statusEl.className   = type;
+function setStatus(msg, type) {
+  statusText.textContent = msg;
+  statusDot.className = "status-dot" + (type === "connected" ? " connected" : type === "error" ? " error" : "");
 }
 
-// ── Audio / WebSocket state ────────────────────────────────────────────────────
-let ws                = null;
-let lastError         = null;
-let micStream         = null;
-let micContext        = null;
-let micProcessor      = null;
-let micMuted          = false;
-let playbackContext   = null;
-let playbackGainNode  = null;
-let nextPlayTime      = 0;
-let audioChunksReceived = 0;
-
-const SEND_SAMPLE_RATE           = 16000;
-const RECV_SAMPLE_RATE           = 24000;
-const BUFFER_SIZE                = 2048;
-const SILENCE_BUFFERS_BEFORE_END = 18;
-const SPEECH_ENERGY_THRESHOLD    = 0.006;
-
-let vadInSpeech    = false;
-let vadSilenceCount = 0;
-
-// ── Camera / video / whiteboard state ─────────────────────────────────────────
-let cameraStream  = null;
-let frameInterval = null;
-const frameCanvas = document.createElement("canvas");
-frameCanvas.width  = 640;
-frameCanvas.height = 360;
-
-const WB_COLORS = ["#111827", "#DC2626", "#2563EB", "#16A34A", "#CA8A04"];
-let wbTool = "pen"; // pen | eraser | text
-let wbColor = WB_COLORS[0];
-let wbDrawing = false;
-let wbLastX = 0, wbLastY = 0;
-
-function wbCanvasCoords(e) {
-  const rect = whiteboardCanvas.getBoundingClientRect();
-  const x = ((e.clientX ?? e.touches?.[0]?.clientX) - rect.left) / rect.width * whiteboardCanvas.width;
-  const y = ((e.clientY ?? e.touches?.[0]?.clientY) - rect.top) / rect.height * whiteboardCanvas.height;
-  return { x, y };
-}
-
-function wbEnsureCtx() {
-  const ctx = whiteboardCanvas.getContext("2d");
-  if (!ctx._wbInited) {
-    ctx._wbInited = true;
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, whiteboardCanvas.width, whiteboardCanvas.height);
-  }
-  return ctx;
-}
-
-function resetWhiteboard() {
-  const ctx = whiteboardCanvas.getContext("2d");
-  ctx.globalCompositeOperation = "source-over";
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(0, 0, whiteboardCanvas.width, whiteboardCanvas.height);
-}
-
-let whiteboardUIInited = false;
-function initWhiteboardUI() {
-  if (whiteboardUIInited) return;
-  whiteboardUIInited = true;
-  wbColorsEl.innerHTML = "";
-  WB_COLORS.forEach((c, i) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "wb-color" + (i === 0 ? " selected" : "");
-    b.style.background = c;
-    b.title = c;
-    b.addEventListener("click", () => {
-      wbColor = c;
-      wbColorsEl.querySelectorAll(".wb-color").forEach(el => el.classList.remove("selected"));
-      b.classList.add("selected");
-      wbTool = "pen";
-      wbPen.classList.add("active");
-      wbEraser.classList.remove("active");
-      wbText.classList.remove("active");
-    });
-    wbColorsEl.appendChild(b);
-  });
-
-  function setTool(tool) {
-    wbTool = tool;
-    wbPen.classList.toggle("active", tool === "pen");
-    wbEraser.classList.toggle("active", tool === "eraser");
-    wbText.classList.toggle("active", tool === "text");
-    whiteboardCanvas.style.cursor = tool === "text" ? "text" : "crosshair";
-  }
-  wbPen.addEventListener("click", () => setTool("pen"));
-  wbEraser.addEventListener("click", () => setTool("eraser"));
-  wbText.addEventListener("click", () => setTool("text"));
-  wbClear.addEventListener("click", () => {
-    const ctx = wbEnsureCtx();
-    ctx.globalCompositeOperation = "source-over";
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, whiteboardCanvas.width, whiteboardCanvas.height);
-  });
-
-  function wbDown(e) {
-    e.preventDefault();
-    const { x, y } = wbCanvasCoords(e);
-    if (wbTool === "text") {
-      const text = window.prompt("Text to place on board:", "");
-      if (text && text.trim()) {
-        const ctx = wbEnsureCtx();
-        ctx.globalCompositeOperation = "source-over";
-        ctx.fillStyle = wbColor;
-        ctx.font = "bold 20px Inter, system-ui, sans-serif";
-        ctx.fillText(text.trim(), x, y);
-      }
-      return;
-    }
-    wbDrawing = true;
-    wbLastX = x;
-    wbLastY = y;
-  }
-  function wbMove(e) {
-    if (!wbDrawing || wbTool === "text") return;
-    e.preventDefault();
-    const { x, y } = wbCanvasCoords(e);
-    const ctx = wbEnsureCtx();
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    if (wbTool === "eraser") {
-      ctx.globalCompositeOperation = "destination-out";
-      ctx.strokeStyle = "rgba(0,0,0,1)";
-      ctx.lineWidth = 24;
-    } else {
-      ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = wbColor;
-      ctx.lineWidth = 3;
-    }
-    ctx.beginPath();
-    ctx.moveTo(wbLastX, wbLastY);
-    ctx.lineTo(x, y);
-    ctx.stroke();
-    wbLastX = x;
-    wbLastY = y;
-  }
-  function wbUp(e) {
-    e.preventDefault();
-    wbDrawing = false;
-  }
-
-  whiteboardCanvas.addEventListener("mousedown", wbDown);
-  whiteboardCanvas.addEventListener("mousemove", wbMove);
-  whiteboardCanvas.addEventListener("mouseup", wbUp);
-  whiteboardCanvas.addEventListener("mouseleave", wbUp);
-  whiteboardCanvas.addEventListener("touchstart", wbDown, { passive: false });
-  whiteboardCanvas.addEventListener("touchmove", wbMove, { passive: false });
-  whiteboardCanvas.addEventListener("touchend", wbUp);
-}
-
-/** Send JPEG frames from whiteboard canvas (same pipeline as camera). */
-function startWhiteboardFrameSender() {
-  if (frameInterval) clearInterval(frameInterval);
-  const ctx = frameCanvas.getContext("2d");
-  frameInterval = setInterval(() => {
-    if (!ws || ws.readyState !== WebSocket.OPEN || micMuted) return;
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, frameCanvas.width, frameCanvas.height);
-    ctx.drawImage(whiteboardCanvas, 0, 0, frameCanvas.width, frameCanvas.height);
-    const base64 = frameCanvas.toDataURL("image/jpeg", 0.72).split(",")[1];
-    try { ws.send(JSON.stringify({ type: "video_frame", base64 })); } catch (_) {}
-  }, 1000);
-}
-
-// ── PCM helpers ────────────────────────────────────────────────────────────────
+// ── PCM helpers ──────────────────────────────────────────────────────────────
 function float32ToPcm16(f32) {
   const pcm = new Int16Array(f32.length);
   for (let i = 0; i < f32.length; i++) {
@@ -789,37 +543,330 @@ function float32ToPcm16(f32) {
 
 function pcm16ToFloat32(pcm16) {
   const f32 = new Float32Array(pcm16.length);
-  for (let i = 0; i < pcm16.length; i++)
-    f32[i] = pcm16[i] / (pcm16[i] < 0 ? 0x8000 : 0x7fff);
+  for (let i = 0; i < pcm16.length; i++) f32[i] = pcm16[i] / (pcm16[i] < 0 ? 0x8000 : 0x7fff);
   return f32;
 }
 
-// ── Camera capture ─────────────────────────────────────────────────────────────
-async function startCamera() {
-  cameraStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 360, frameRate: 30 }, audio: true });
-  cameraFeed.srcObject = cameraStream;
-  await cameraFeed.play().catch(() => {});
+// ── Audio playback ───────────────────────────────────────────────────────────
+async function playPcm24k(arrayBuffer) {
+  if (!arrayBuffer || arrayBuffer.byteLength === 0) return;
+  try {
+    audioChunksReceived++;
+    if (audioChunksReceived === 1) setOrbState("speaking");
+    if (!playbackContext) playbackContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: RECV_SAMPLE_RATE });
+    if (playbackContext.state === "suspended") await playbackContext.resume();
 
-  const ctx = frameCanvas.getContext("2d");
-  frameInterval = setInterval(() => {
-    if (!ws || ws.readyState !== WebSocket.OPEN || micMuted) return;
-    ctx.drawImage(cameraFeed, 0, 0, frameCanvas.width, frameCanvas.height);
-    const base64 = frameCanvas.toDataURL("image/jpeg", 0.7).split(",")[1];
-    try { ws.send(JSON.stringify({ type: "video_frame", base64 })); } catch (_) {}
-  }, 1000);
+    const pcm16 = new Int16Array(arrayBuffer);
+    const f32 = pcm16ToFloat32(pcm16);
+    const buf = playbackContext.createBuffer(1, f32.length, RECV_SAMPLE_RATE);
+    buf.getChannelData(0).set(f32);
 
-  return cameraStream;
+    const src = playbackContext.createBufferSource();
+    src.buffer = buf;
+    if (!playbackGainNode) {
+      playbackGainNode = playbackContext.createGain();
+      playbackGainNode.gain.value = 2.5;
+      playbackGainNode.connect(playbackContext.destination);
+    }
+    src.connect(playbackGainNode);
+    const now = playbackContext.currentTime;
+    if (nextPlayTime < now) nextPlayTime = now;
+    src.start(nextPlayTime);
+    nextPlayTime += buf.duration;
+  } catch (err) { console.error("playPcm24k:", err); }
 }
 
-// ── Mic capture ────────────────────────────────────────────────────────────────
+function stopPlayback() {
+  playbackGainNode = null;
+  if (playbackContext) { try { playbackContext.close(); } catch (_) {} playbackContext = null; }
+  nextPlayTime = 0;
+}
+
+// ── Transcript management ────────────────────────────────────────────────────
+function addTranscriptEntry(speaker, type) {
+  const id = ++transcriptEntryId;
+  const div = document.createElement("div");
+  div.className = "t-entry";
+
+  const sp = document.createElement("div");
+  sp.className = `t-speaker ${type}`;
+  sp.textContent = speaker;
+
+  const txt = document.createElement("div");
+  txt.className = "t-text";
+
+  div.appendChild(sp);
+  div.appendChild(txt);
+  transcriptBody.appendChild(div);
+  transcriptBody.scrollTop = transcriptBody.scrollHeight;
+
+  return { id, el: div, textEl: txt, rawText: "" };
+}
+
+function appendToEntry(entry, chunk) {
+  if (!entry) return;
+  const t = entry.rawText;
+  if (t && !t.endsWith(" ") && !chunk.startsWith(" ") && !/^[.,!?;:]/.test(chunk)) {
+    entry.rawText += " ";
+  }
+  entry.rawText += chunk;
+  entry.textEl.textContent = entry.rawText;
+  transcriptBody.scrollTop = transcriptBody.scrollHeight;
+}
+
+async function cleanupEntry(entry) {
+  if (!entry || !entry.rawText.trim()) return;
+  entry.textEl.classList.add("cleaning");
+  try {
+    const res = await fetch("/api/cleanup-transcript", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text: entry.rawText,
+        topic: sessionTopic,
+        materials: (sessionMaterials || "").substring(0, 2000),
+      }),
+    });
+    const { cleaned } = await res.json();
+    if (cleaned && cleaned.trim()) {
+      entry.rawText = cleaned;
+      entry.textEl.textContent = cleaned;
+    }
+  } catch (_) {}
+  entry.textEl.classList.remove("cleaning");
+}
+
+// ── Coaching tips ────────────────────────────────────────────────────────────
+function addCoachingTip(tipText) {
+  const empty = coachingBody.querySelector(".coaching-empty");
+  if (empty) empty.remove();
+
+  const div = document.createElement("div");
+  div.className = "coaching-tip";
+  div.innerHTML = tipText.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+  coachingBody.appendChild(div);
+  coachingBody.scrollTop = coachingBody.scrollHeight;
+
+  while (coachingBody.children.length > 8) coachingBody.removeChild(coachingBody.firstChild);
+}
+
+// ── Whiteboard ───────────────────────────────────────────────────────────────
+function initWhiteboard() {
+  if (whiteboardInited) return;
+  whiteboardInited = true;
+  const ctx = whiteboardCanvas.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, whiteboardCanvas.width, whiteboardCanvas.height);
+  setupWhiteboardEvents();
+}
+
+function setupWhiteboardEvents() {
+  const canvas = whiteboardCanvas;
+
+  function getPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const sx = canvas.width / rect.width;
+    const sy = canvas.height / rect.height;
+    const cx = e.touches ? e.touches[0].clientX : e.clientX;
+    const cy = e.touches ? e.touches[0].clientY : e.clientY;
+    return { x: (cx - rect.left) * sx, y: (cy - rect.top) * sy };
+  }
+
+  function onStart(e) {
+    e.preventDefault();
+    if (currentTool === "text") {
+      const pos = getPos(e);
+      const text = prompt("Enter text:");
+      if (text) {
+        const ctx = canvas.getContext("2d");
+        ctx.font = "bold 24px Inter, system-ui, sans-serif";
+        ctx.fillStyle = currentColor;
+        ctx.fillText(text, pos.x, pos.y);
+        canvasDirty = true;
+      }
+      return;
+    }
+    wbDrawing = true;
+    const pos = getPos(e);
+    wbLastX = pos.x; wbLastY = pos.y;
+  }
+
+  function onMove(e) {
+    if (!wbDrawing) return;
+    e.preventDefault();
+    const pos = getPos(e);
+    const ctx = canvas.getContext("2d");
+    ctx.lineWidth = currentTool === "eraser" ? 30 : 3;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = currentTool === "eraser" ? "#ffffff" : currentColor;
+    ctx.beginPath();
+    ctx.moveTo(wbLastX, wbLastY);
+    ctx.lineTo(pos.x, pos.y);
+    ctx.stroke();
+    wbLastX = pos.x; wbLastY = pos.y;
+    canvasDirty = true;
+  }
+
+  function onEnd() { wbDrawing = false; }
+
+  canvas.addEventListener("mousedown", onStart);
+  canvas.addEventListener("mousemove", onMove);
+  canvas.addEventListener("mouseup", onEnd);
+  canvas.addEventListener("mouseleave", onEnd);
+  canvas.addEventListener("touchstart", onStart, { passive: false });
+  canvas.addEventListener("touchmove", onMove, { passive: false });
+  canvas.addEventListener("touchend", onEnd);
+}
+
+function clearWhiteboard() {
+  const ctx = whiteboardCanvas.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, whiteboardCanvas.width, whiteboardCanvas.height);
+  canvasDirty = true;
+}
+
+// Whiteboard toolbar events
+document.querySelectorAll(".wb-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const tool = btn.dataset.tool;
+    if (tool === "clear") { clearWhiteboard(); return; }
+    currentTool = tool;
+    document.querySelectorAll(".wb-btn").forEach(b => b.classList.toggle("active", b.dataset.tool === tool));
+  });
+});
+
+document.querySelectorAll(".wb-color").forEach(swatch => {
+  swatch.addEventListener("click", () => {
+    currentColor = swatch.dataset.color;
+    document.querySelectorAll(".wb-color").forEach(s => s.classList.toggle("active", s === swatch));
+    if (currentTool === "eraser") {
+      currentTool = "pen";
+      document.querySelectorAll(".wb-btn").forEach(b => b.classList.toggle("active", b.dataset.tool === "pen"));
+    }
+  });
+});
+
+// ── Camera management ────────────────────────────────────────────────────────
+async function startCamera(withAudio = false) {
+  cameraStream = await navigator.mediaDevices.getUserMedia({
+    video: { width: 640, height: 360, frameRate: 30 },
+    audio: withAudio,
+  });
+  cameraFeed.srcObject = cameraStream;
+  cameraPipFeed.srcObject = cameraStream;
+  await cameraFeed.play().catch(() => {});
+  await cameraPipFeed.play().catch(() => {});
+}
+
+function stopCamera() {
+  if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
+  cameraFeed.srcObject = null;
+  cameraPipFeed.srcObject = null;
+}
+
+// ── Screen share management ─────────────────────────────────────────────────
+async function startScreenShare() {
+  screenStream = await navigator.mediaDevices.getDisplayMedia({
+    video: { cursor: "always" },
+  });
+  screenFeed.srcObject = screenStream;
+  await screenFeed.play().catch(() => {});
+
+  // Handle browser's "Stop sharing" button
+  screenStream.getVideoTracks()[0].onended = () => {
+    screenEnabled = false;
+    stopScreenShare();
+    updateMediaLayout();
+  };
+}
+
+function stopScreenShare() {
+  if (screenStream) { screenStream.getTracks().forEach(t => t.stop()); screenStream = null; }
+  screenFeed.srcObject = null;
+}
+
+// ── Media layout ─────────────────────────────────────────────────────────────
+const sessionCenter = document.querySelector(".session-center");
+
+function updateMediaLayout() {
+  const activeSources = [cameraEnabled, whiteboardEnabled, screenEnabled].filter(Boolean).length;
+  const dualMedia   = activeSources === 2;
+  const tripleMedia = activeSources === 3;
+
+  // Whiteboard in media container (top of center)
+  mediaContainer.classList.toggle("hidden", !whiteboardEnabled);
+  whiteboardCanvas.style.display = whiteboardEnabled ? "block" : "none";
+  cameraFeed.style.display = "none"; // Hidden — only used internally
+  wbToolbar.classList.toggle("visible", whiteboardEnabled);
+  orbPill.classList.toggle("visible", whiteboardEnabled);
+
+  // Screen share container
+  screenContainer.classList.toggle("visible", screenEnabled);
+
+  // Camera self-view in center column
+  cameraContainer.classList.toggle("visible", cameraEnabled);
+
+  // Layout modes: dual-media when 2 sources, triple-media when all 3
+  sessionCenter.classList.toggle("dual-media", dualMedia);
+  sessionCenter.classList.toggle("triple-media", tripleMedia);
+
+  // Orb: hide when any media is active (except classroom uses its own orbs)
+  const hasMedia = cameraEnabled || whiteboardEnabled || screenEnabled;
+  orbArea.classList.toggle("hidden", hasMedia || classroomMode);
+
+  camToggleBtn.classList.toggle("active", cameraEnabled);
+  wbToggleBtn.classList.toggle("active", whiteboardEnabled);
+  screenToggleBtn.classList.toggle("active", screenEnabled);
+}
+
+// ── Frame sending (camera always, whiteboard only on changes) ────────────────
+function startFrameSending() {
+  if (frameInterval) clearInterval(frameInterval);
+  frameInterval = setInterval(() => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!cameraEnabled && !whiteboardEnabled && !screenEnabled) return;
+
+    const ctx = compositeCanvas.getContext("2d");
+
+    // Always send camera frame when camera is on
+    if (cameraEnabled && cameraPipFeed.readyState >= 2) {
+      ctx.drawImage(cameraPipFeed, 0, 0, 640, 360);
+      const base64 = compositeCanvas.toDataURL("image/jpeg", 0.7).split(",")[1];
+      try { ws.send(JSON.stringify({ type: "video_frame", base64 })); } catch (_) {}
+    }
+
+    // Only send whiteboard frame when something changed
+    if (whiteboardEnabled && canvasDirty) {
+      ctx.drawImage(whiteboardCanvas, 0, 0, 640, 360);
+      const base64 = compositeCanvas.toDataURL("image/jpeg", 0.7).split(",")[1];
+      try { ws.send(JSON.stringify({ type: "video_frame", base64 })); } catch (_) {}
+      canvasDirty = false;
+    }
+
+    // Always send screen share frame when active
+    if (screenEnabled && screenFeed.readyState >= 2) {
+      ctx.drawImage(screenFeed, 0, 0, 640, 360);
+      const base64 = compositeCanvas.toDataURL("image/jpeg", 0.7).split(",")[1];
+      try { ws.send(JSON.stringify({ type: "video_frame", base64 })); } catch (_) {}
+    }
+  }, 1000);
+}
+
+// ── Mic capture ──────────────────────────────────────────────────────────────
 async function startMic(existingStream = null) {
-  micStream  = existingStream || await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  micStream = existingStream || await navigator.mediaDevices.getUserMedia({ audio: true });
+  // Use only the audio tracks to avoid re-stopping video tracks on disconnect
+  const audioOnlyStream = new MediaStream(micStream.getAudioTracks());
   micContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SEND_SAMPLE_RATE });
-  const source = micContext.createMediaStreamSource(micStream);
+  const source = micContext.createMediaStreamSource(audioOnlyStream);
 
   micProcessor = micContext.createScriptProcessor(BUFFER_SIZE, 1, 1);
   micProcessor.onaudioprocess = e => {
     if (micMuted || !ws || ws.readyState !== WebSocket.OPEN) return;
+    // Echo suppression: don't send audio while student is speaking
+    // (mic picks up student playback from speakers, which would interrupt the student)
+    if (currentOrbState === "speaking") return;
     const input = e.inputBuffer.getChannelData(0);
     let sum = 0;
     for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
@@ -827,22 +874,28 @@ async function startMic(existingStream = null) {
 
     if (rms > SPEECH_ENERGY_THRESHOLD) {
       if (!vadInSpeech) {
+        vadInSpeech = true;
+        teacherSpeechEnded = false;
         setMicActive(true);
         if (currentOrbState !== "speaking") setOrbState("listening");
         try { ws.send(JSON.stringify({ type: "speech_start" })); } catch (_) {}
       }
-      vadInSpeech = true;
       vadSilenceCount = 0;
     } else if (vadInSpeech) {
       vadSilenceCount++;
       if (vadSilenceCount >= SILENCE_BUFFERS_BEFORE_END) {
         vadInSpeech = false;
         vadSilenceCount = 0;
+        teacherSpeechEnded = true;
         setMicActive(false);
         if (currentOrbState !== "speaking") setOrbState("thinking");
-        // Notify server so it can finalize teacher transcript + generate coaching tip
         try { ws.send(JSON.stringify({ type: "speech_end" })); } catch (_) {}
-        finalizeTeacherTranscript();
+
+        // Cleanup teacher transcript
+        if (currentTeacherEntry && currentTeacherEntry.rawText.trim()) {
+          cleanupEntry(currentTeacherEntry);
+        }
+        currentTeacherEntry = null;
       }
     }
     try { ws.send(float32ToPcm16(input)); } catch (_) {}
@@ -856,299 +909,284 @@ async function startMic(existingStream = null) {
   if (micContext.state === "suspended") await micContext.resume();
 }
 
-// ── Playback ───────────────────────────────────────────────────────────────────
-async function playPcm24k(arrayBuffer) {
-  if (!arrayBuffer || arrayBuffer.byteLength === 0) return;
-  try {
-    audioChunksReceived++;
-    if (audioChunksReceived === 1) setOrbState("speaking");
-
-    if (!playbackContext)
-      playbackContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: RECV_SAMPLE_RATE });
-    if (playbackContext.state === "suspended") await playbackContext.resume();
-
-    const pcm16 = new Int16Array(arrayBuffer);
-    const f32   = pcm16ToFloat32(pcm16);
-    const buf   = playbackContext.createBuffer(1, f32.length, RECV_SAMPLE_RATE);
-    buf.getChannelData(0).set(f32);
-
-    const src = playbackContext.createBufferSource();
-    src.buffer = buf;
-    if (!playbackGainNode) {
-      playbackGainNode = playbackContext.createGain();
-      playbackGainNode.gain.value = 2.5;
-      playbackGainNode.connect(playbackContext.destination);
-    }
-    src.connect(playbackGainNode);
-
-    const now = playbackContext.currentTime;
-    if (nextPlayTime < now) nextPlayTime = now;
-    src.start(nextPlayTime);
-    nextPlayTime += buf.duration;
-  } catch (err) {
-    console.error("playPcm24k error:", err);
-  }
+// ── Session timer ────────────────────────────────────────────────────────────
+function formatTime(sec) {
+  const m = Math.floor(sec / 60).toString().padStart(2, "0");
+  const s = (sec % 60).toString().padStart(2, "0");
+  return `${m}:${s}`;
 }
 
-function stopPlayback() {
-  playbackGainNode = null;
-  if (playbackContext) { try { playbackContext.close(); } catch (_) {} playbackContext = null; }
-  nextPlayTime = 0;
+function startTimer() {
+  sessionStartTime = Date.now();
+  sessionDuration = 0;
+  sessionTimer.textContent = "00:00";
+  timerInterval = setInterval(() => {
+    sessionDuration = Math.floor((Date.now() - sessionStartTime) / 1000);
+    sessionTimer.textContent = formatTime(sessionDuration);
+  }, 1000);
 }
 
-// ── Session lifecycle ──────────────────────────────────────────────────────────
+function stopTimer() {
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+}
+
+// ── Session lifecycle ────────────────────────────────────────────────────────
 function showSession(topic) {
-  setupScreen.style.display   = "none";
+  setupScreen.style.display = "none";
+  reflectionScreen.style.display = "none";
   sessionScreen.style.display = "flex";
-  const useWb = useWhiteboardEl && useWhiteboardEl.checked;
-  const useCam = useCameraEl.checked;
-  sessionScreen.classList.toggle("video-mode",      useCam && !useWb);
-  sessionScreen.classList.toggle("whiteboard-mode",  useWb);
-  sessionScreen.classList.toggle("classroom-mode",   classroomMode);
+  sessionScreen.classList.toggle("classroom-mode", classroomMode);
+
   sessionTopicLabel.textContent = topic;
-  speakerLabel.textContent      = "";
-  speakerLabel.style.color      = "";
+  speakerLabel.textContent = "";
+  speakerLabel.style.color = "";
   setOrbState("idle");
-  setStatus("Connecting…");
-  resetTranscript();
-  resetCoachingPanel();
+  setStatus("Connecting\u2026", "");
+
+  // Clear transcript & coaching
+  transcriptBody.innerHTML = "";
+  coachingBody.innerHTML = '<div class="coaching-empty">Tips will appear as you teach\u2026</div>';
+  transcriptEntryId = 0;
+  currentTeacherEntry = null;
+  currentStudentEntry = null;
+
   if (classroomMode) createClassroomOrbs();
+  updateMediaLayout();
 }
 
 function showSetup() {
   sessionScreen.style.display = "none";
+  reflectionScreen.style.display = "none";
   sessionScreen.classList.remove("classroom-mode");
-  setupScreen.style.display   = "flex";
-  speakerLabel.textContent    = "";
-  speakerLabel.style.color    = "";
+  setupScreen.style.display = "flex";
   setOrbState("idle");
+  stopBtn.disabled = false;
 }
 
-// Tracks last speaking student/name for transcript colouring
-let _lastStudentName  = "Student";
-let _lastStudentColor = null;
+function showReflection(data) {
+  sessionScreen.style.display = "none";
+  reflectionScreen.style.display = "flex";
 
-function disconnect(requestReflection = false) {
-  if (requestReflection && ws && ws.readyState === WebSocket.OPEN) {
-    // Ask server for reflection — it will reply and we'll show it then close
-    try { ws.send(JSON.stringify({ type: "request_reflection" })); } catch (_) {}
-    return; // Don't disconnect yet; wait for reflection message
+  reflectionSummary.textContent = data.summary || "";
+
+  function fillList(el, items) {
+    el.innerHTML = "";
+    (items || []).forEach(item => {
+      const li = document.createElement("li");
+      li.textContent = item;
+      el.appendChild(li);
+    });
+    if (!items || items.length === 0) {
+      const li = document.createElement("li");
+      li.textContent = "No data";
+      li.style.color = "#9CA3AF";
+      el.appendChild(li);
+    }
   }
 
+  fillList(reflectionStrengths, data.strengths);
+  fillList(reflectionGaps, data.gaps);
+  fillList(reflectionQuestions, data.topQuestions);
+  fillList(reflectionImprovements, data.improvements);
+
+  // Save to Firebase
+  saveSession({ topic: sessionTopic, reflection: data, duration: sessionDuration });
+}
+
+function disconnect(keepScreen = false) {
   if (ws) { try { ws.close(); } catch (_) {} ws = null; }
   if (micProcessor) { try { micProcessor.disconnect(); } catch (_) {} micProcessor = null; }
-  if (micStream)    { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
-  if (micContext)   { try { micContext.close(); } catch (_) {} micContext = null; }
-  if (frameInterval){ clearInterval(frameInterval); frameInterval = null; }
-  if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
-  cameraFeed.srcObject = null;
-  stopBrowserSpeechRecognition();
+  if (micStream) { micStream.getAudioTracks().forEach(t => t.stop()); micStream = null; }
+  if (micContext) { try { micContext.close(); } catch (_) {} micContext = null; }
+  stopCamera();
+  stopScreenShare();
+  screenEnabled = false;
+  if (frameInterval) { clearInterval(frameInterval); frameInterval = null; }
+  stopTimer();
   stopPlayback();
 
   audioChunksReceived = 0;
-  vadInSpeech    = false;
+  vadInSpeech = false;
   vadSilenceCount = 0;
   micMuted = false;
-  muteBtn.textContent = "Mute";
-  muteBtn.classList.remove("muted");
-  setMicActive(false);
+  teacherSpeechEnded = false;
+  currentTeacherEntry = null;
+  currentStudentEntry = null;
+  activeSpeakerName = "";
+  awaitingReflection = false;
+  whiteboardInited = false;
+
+  if (!keepScreen) {
+    if (lastError) setStatus(lastError, "error");
+    setTimeout(showSetup, 800);
+  }
 }
 
 async function connect() {
   lastError = null;
-  const topic = getSelectedTopic();
-  const materialsNotes = materialsNotesEl ? materialsNotesEl.value.trim() : "";
-  let materialsId = window.__materialsId || "";
-  // Persist notes into stored session so server can merge with file context
-  if (materialsId && materialsNotesEl) {
-    try {
-      await fetch(`${window.location.origin}/api/materials/${materialsId}/notes`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ notes: materialsNotes }),
-      });
-    } catch (_) {}
-  }
-  // No uploads but user typed notes only — pass inline if short; else create session and save notes
-  if (!materialsId && materialsNotes && materialsNotes.length < 3000) {
-    // short notes only, no files
-  } else if (!materialsId && materialsNotes) {
-    try {
-      const r = await fetch(`${window.location.origin}/api/materials/session`, { method: "POST" });
-      const j = await r.json();
-      if (j.materialsId) {
-        materialsId = j.materialsId;
-        window.__materialsId = materialsId;
-        await fetch(`${window.location.origin}/api/materials/${materialsId}/notes`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ notes: materialsNotes }),
-        });
-      }
-    } catch (_) {}
-  }
-
-  const useVideo = useCameraEl.checked || (useWhiteboardEl && useWhiteboardEl.checked);
+  awaitingReflection = false;
+  sessionTopic = getSelectedTopic();
+  sessionMaterials = materialsEl.value.trim();
+  cameraEnabled = useCameraEl.checked;
+  whiteboardEnabled = useWhiteboardEl.checked;
+  screenEnabled = false; // Screen share toggled on during session
+  // Always enable video model — screen share can be toggled mid-session
+  const useVideo = true;
   const studentsParam = classroomMode ? Array.from(selectedStudents).join(",") : "";
 
-  showSession(topic);
-  if (useWhiteboardEl && useWhiteboardEl.checked) resetWhiteboard();
+  showSession(sessionTopic);
 
-  if (!playbackContext)
-    playbackContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: RECV_SAMPLE_RATE });
+  if (!playbackContext) playbackContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: RECV_SAMPLE_RATE });
   if (playbackContext.state === "suspended") await playbackContext.resume();
 
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const url = `${protocol}//${window.location.host}/ws/live`
-    + `?topic=${encodeURIComponent(topic)}`
+  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  const url = `${protocol}//${location.host}/ws/live`
+    + `?topic=${encodeURIComponent(sessionTopic)}`
     + `&persona=${encodeURIComponent(selectedPersona)}`
     + `&video=${useVideo ? "1" : "0"}`
     + `&classroom=${classroomMode ? "1" : "0"}`
     + (studentsParam ? `&students=${encodeURIComponent(studentsParam)}` : "")
-    + (materialsId ? `&materialsId=${encodeURIComponent(materialsId)}` : "")
-    + (!materialsId && materialsNotes && materialsNotes.length < 3000
-      ? `&materials=${encodeURIComponent(materialsNotes)}`
-      : "");
+    + (sessionMaterials ? `&materials=${encodeURIComponent(sessionMaterials)}` : "");
 
   ws = new WebSocket(url);
   ws.binaryType = "arraybuffer";
 
   ws.onopen = async () => {
-    setStatus("Your student is ready — start explaining.", "connected");
-    startBrowserSpeechRecognition();
+    setStatus("Connected", "connected");
     try {
-      const useWb = useWhiteboardEl && useWhiteboardEl.checked;
-      if (useVideo && useWb && !useCameraEl.checked) {
-        // Whiteboard only: mic without camera video
-        wbEnsureCtx();
-        startWhiteboardFrameSender();
-        await startMic();
-      } else if (useVideo && useWb && useCameraEl.checked) {
-        // Both: send whiteboard frames; camera optional for teacher (hidden in UI)
-        wbEnsureCtx();
-        startWhiteboardFrameSender();
-        await startMic();
-      } else if (useVideo) {
-        const stream = await startCamera();
-        await startMic(stream);
+      // Send uploaded study material files as initial context
+      for (const file of uploadedFiles) {
+        try {
+          ws.send(JSON.stringify({
+            type: "material_file",
+            name: file.name,
+            mimeType: file.mimeType,
+            base64: file.base64,
+          }));
+        } catch (_) {}
+      }
+
+      if (cameraEnabled) {
+        // Get audio+video together to avoid dual getUserMedia permission issues
+        await startCamera(true);
+        await startMic(cameraStream);
       } else {
         await startMic();
       }
+      if (whiteboardEnabled) initWhiteboard();
+      updateMediaLayout();
+      startFrameSending();
+      startTimer();
     } catch (e) {
-      setStatus("Camera/mic access failed: " + e.message, "error");
+      setStatus("Camera/mic failed: " + e.message, "error");
     }
   };
 
   ws.onclose = () => {
-    // Natural close (e.g. server-side) — just go back to setup
-    disconnect();
-    if (lastError) setStatus(lastError, "error");
-    else           setStatus("Session ended.");
-    setTimeout(showSetup, 1200);
+    if (!awaitingReflection) disconnect();
   };
 
-  ws.onerror = () => { lastError = "Connection error."; setStatus("Connection error.", "error"); };
+  ws.onerror = () => {
+    lastError = "Connection error.";
+    setStatus("Connection error", "error");
+  };
 
   ws.onmessage = async event => {
+    // Binary audio
     if (event.data instanceof ArrayBuffer) { await playPcm24k(event.data); return; }
-    if (event.data instanceof Blob)        { await playPcm24k(await event.data.arrayBuffer()); return; }
+    if (event.data instanceof Blob) { await playPcm24k(await event.data.arrayBuffer()); return; }
 
     try {
       const msg = JSON.parse(event.data);
 
-      if (msg.type === "info")  setStatus(msg.message || "", "connected");
+      // Status
+      if (msg.type === "info") setStatus(msg.message || "", "connected");
       if (msg.type === "error") { lastError = msg.message; setStatus(msg.message, "error"); }
 
-      // ── Teacher transcript (left panel) ──
+      // Teacher transcript (from Gemini inputAudioTranscription)
       if (msg.type === "teacher_transcript" && msg.text) {
-        appendTeacherTranscript(msg.text); // no-op when browserTranscriptActive
+        if (!currentTeacherEntry) {
+          currentTeacherEntry = addTranscriptEntry("You", "teacher");
+        }
+        appendToEntry(currentTeacherEntry, msg.text);
       }
 
-      // ── Student transcript ──
+      // Student transcript
       if (msg.type === "transcript" && msg.text) {
-        appendStudentTranscript(msg.text, _lastStudentName, _lastStudentColor);
+        if (!currentStudentEntry) {
+          const speaker = classroomMode ? (activeSpeakerName || "Student") : "Student";
+          currentStudentEntry = addTranscriptEntry(speaker, "student");
+        }
+        appendToEntry(currentStudentEntry, msg.text);
       }
 
-      // ── Coaching tip (right panel) ──
-      if (msg.type === "coaching_tip" && msg.tip) {
-        addCoachingTip(msg.tip);
-      }
-
-      // ── Reflection ──
-      if (msg.type === "reflection" && msg.data) {
-        const topic = getSelectedTopic();
-        // Hard disconnect before showing reflection
-        if (ws) { try { ws.close(); } catch (_) {} ws = null; }
-        if (micProcessor) { try { micProcessor.disconnect(); } catch (_) {} micProcessor = null; }
-        if (micStream)    { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
-        if (micContext)   { try { micContext.close(); } catch (_) {} micContext = null; }
-        if (frameInterval){ clearInterval(frameInterval); frameInterval = null; }
-        if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
-        cameraFeed.srcObject = null;
-        stopBrowserSpeechRecognition();
-        stopPlayback();
-        audioChunksReceived = 0; vadInSpeech = false; vadSilenceCount = 0;
-        micMuted = false; muteBtn.textContent = "Mute"; muteBtn.classList.remove("muted");
-        setMicActive(false);
-        showReflection(topic, msg.data);
-        return;
-      }
-
+      // Solo turn complete
       if (msg.type === "turn_complete") {
         audioChunksReceived = 0;
-        finalizeStudentTranscript();
+        currentStudentEntry = null;
         setOrbState("listening");
-        setStatus("Your turn — speak and pause when done.", "connected");
+        setStatus("Your turn \u2014 speak and pause when done.", "connected");
       }
 
-      if (msg.type === "emotion" && SERVER_EMOTION_STATES.has(msg.state)) {
-        if (!classroomMode) setOrbState(msg.state);
-      }
-
+      // Classroom student speaking
       if (msg.type === "student_speaking" && msg.name) {
-        const s = STUDENTS[msg.name.toLowerCase()];
-        _lastStudentName  = s ? s.name : msg.name;
-        _lastStudentColor = s ? s.color : null;
+        activeSpeakerName = STUDENTS[msg.name.toLowerCase()]?.name || msg.name;
         if (classroomMode) {
           activateStudentOrb(msg.name.toLowerCase());
-          setStatus(`${_lastStudentName} is speaking…`, "connected");
+          setStatus(`${activeSpeakerName} is speaking\u2026`, "connected");
         } else {
           setSpeaker(msg.name);
         }
       }
 
+      // Classroom turn complete
       if (msg.type === "student_turn_complete" && msg.studentId) {
         deactivateStudentOrb(msg.studentId);
-        finalizeStudentTranscript();
         audioChunksReceived = 0;
-        setStatus("Your turn — speak and pause when done.", "connected");
+        currentStudentEntry = null;
+        setStatus("Your turn \u2014 speak and pause when done.", "connected");
       }
 
+      // Emotion
+      if (msg.type === "emotion" && SERVER_EMOTION_STATES.has(msg.state)) {
+        if (!classroomMode) setOrbState(msg.state);
+      }
+
+      // Audio (solo)
       if (msg.type === "audio" && msg.base64) {
-        try {
-          const binary = atob(msg.base64);
-          const bytes  = new Uint8Array(binary.length);
-          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-          await playPcm24k(bytes.buffer);
-        } catch (e) { console.error("Audio decode error:", e); }
+        const binary = atob(msg.base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        await playPcm24k(bytes.buffer);
       }
 
+      // Audio (classroom)
       if (msg.type === "classroom_audio" && msg.base64) {
-        try {
-          const binary = atob(msg.base64);
-          const bytes  = new Uint8Array(binary.length);
-          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-          await playPcm24k(bytes.buffer);
-        } catch (e) { console.error("Classroom audio decode error:", e); }
+        const binary = atob(msg.base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        await playPcm24k(bytes.buffer);
+      }
+
+      // Coaching tip
+      if (msg.type === "coaching_tip" && msg.tip) {
+        addCoachingTip(msg.tip);
+      }
+
+      // Reflection
+      if (msg.type === "reflection" && msg.data) {
+        awaitingReflection = false;
+        disconnect(true);
+        showReflection(msg.data);
       }
     } catch (_) {}
   };
 }
 
-// ── Controls ───────────────────────────────────────────────────────────────────
+// ── Controls ─────────────────────────────────────────────────────────────────
 startBtn.addEventListener("click", async () => {
-  if (classroomMode && selectedStudents.size < 2) { setStatus("Select at least 2 students.", "error"); return; }
-  if (!getSelectedTopic()) { setStatus("Pick a topic first.", "error"); return; }
+  if (classroomMode && selectedStudents.size < 2) return;
+  if (!getSelectedTopic()) return;
   playButtonSound("confirm");
   startBtn.disabled = true;
   await connect();
@@ -1157,169 +1195,152 @@ startBtn.addEventListener("click", async () => {
 
 stopBtn.addEventListener("click", () => {
   playButtonSound("end");
-  // Show reflection loading immediately, then request it from server
-  const topic = getSelectedTopic();
-  showReflectionLoading(topic);
-  // Send reflection request — ws.onmessage will handle the response
   if (ws && ws.readyState === WebSocket.OPEN) {
     try { ws.send(JSON.stringify({ type: "request_reflection" })); } catch (_) {}
+    awaitingReflection = true;
+    setStatus("Generating reflection\u2026", "connected");
+    stopBtn.disabled = true;
   } else {
-    // No WS — just go to setup
-    reflectionScreen.style.display = "none";
-    showSetup();
+    disconnect();
   }
 });
 
 muteBtn.addEventListener("click", () => {
   micMuted = !micMuted;
-  muteBtn.textContent = micMuted ? "Unmute" : "Mute";
+  muteBtn.innerHTML = micMuted
+    ? '<span class="icon">&#x1F507;</span> Unmute'
+    : '<span class="icon">&#x1F3A4;</span> Mute';
   muteBtn.classList.toggle("muted", micMuted);
+  // Always reset mic indicator (it'll re-activate when VAD detects speech after unmute)
+  setMicActive(false);
+  // Reset VAD state on mute so it doesn't get stuck
+  if (micMuted) {
+    vadInSpeech = false;
+    vadSilenceCount = 0;
+  }
+});
+
+doneSpeakingBtn.addEventListener("click", () => {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  try { ws.send(JSON.stringify({ type: "speech_end" })); } catch (_) {}
+  teacherSpeechEnded = true;
+  vadInSpeech = false;
+  vadSilenceCount = 0;
+  setOrbState("thinking");
+  setMicActive(false);
+
+  if (currentTeacherEntry && currentTeacherEntry.rawText.trim()) {
+    cleanupEntry(currentTeacherEntry);
+  }
+  currentTeacherEntry = null;
+});
+
+camToggleBtn.addEventListener("click", async () => {
+  if (cameraEnabled) {
+    cameraEnabled = false;
+    stopCamera();
+    updateMediaLayout();
+  } else {
+    try {
+      cameraEnabled = true;
+      updateMediaLayout(); // Make PiP container visible BEFORE play()
+      await startCamera();
+    } catch (e) {
+      cameraEnabled = false;
+      updateMediaLayout();
+      setStatus("Camera failed: " + e.message, "error");
+      return;
+    }
+  }
+});
+
+wbToggleBtn.addEventListener("click", () => {
+  whiteboardEnabled = !whiteboardEnabled;
+  if (whiteboardEnabled && !whiteboardInited) initWhiteboard();
+  updateMediaLayout();
+});
+
+screenToggleBtn.addEventListener("click", async () => {
+  if (screenEnabled) {
+    screenEnabled = false;
+    stopScreenShare();
+    updateMediaLayout();
+  } else {
+    try {
+      screenEnabled = true;
+      updateMediaLayout(); // Show container before stream starts
+      await startScreenShare();
+      // Re-start frame sending so it picks up screen share
+      startFrameSending();
+    } catch (e) {
+      screenEnabled = false;
+      updateMediaLayout();
+      // User cancelled the share picker or error — silent fail
+      if (e.name !== "NotAllowedError") {
+        setStatus("Screen share failed: " + e.message, "error");
+      }
+    }
+  }
 });
 
 function sendChatMessage() {
   const text = chatInput.value.trim();
   if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
-  try {
-    ws.send(JSON.stringify({ type: "text_input", text }));
-    chatInput.value = "";
-    setOrbState("thinking");
-  } catch (_) {}
+  try { ws.send(JSON.stringify({ type: "text_input", text })); } catch (_) {}
+  // Show typed message in transcript
+  const entry = addTranscriptEntry("You (typed)", "teacher");
+  entry.rawText = text;
+  entry.textEl.textContent = text;
+  chatInput.value = "";
+  setOrbState("thinking");
 }
 
 chatSendBtn.addEventListener("click", sendChatMessage);
 chatInput.addEventListener("keydown", e => { if (e.key === "Enter") sendChatMessage(); });
 
-doneSpeakingBtn.addEventListener("click", () => {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  try {
-    ws.send(JSON.stringify({ type: "speech_end" }));
-    setOrbState("thinking");
-    setMicActive(false);
-    finalizeTeacherTranscript();
-  } catch (_) {}
+// Keyboard shortcuts (when not typing)
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+  if (sessionScreen.style.display !== "flex") return;
+  if (e.key === "m" || e.key === "M") { muteBtn.click(); e.preventDefault(); }
 });
 
-// ── Study materials: stored files + notes (context resolved server-side at session start) ──
-function setMaterialsStatus(msg, isError) {
-  if (!materialsStatusEl) return;
-  materialsStatusEl.textContent = msg || "";
-  materialsStatusEl.classList.toggle("error", !!isError);
-}
+// ── Reflection screen controls ───────────────────────────────────────────────
+teachAgainBtn.addEventListener("click", () => {
+  reflectionScreen.style.display = "none";
+  showSetup();
+});
 
-async function ensureMaterialsSession() {
-  if (window.__materialsId) return window.__materialsId;
+changeTopicBtn.addEventListener("click", () => {
+  reflectionScreen.style.display = "none";
+  showSetup();
+});
+
+// ── Firebase ─────────────────────────────────────────────────────────────────
+function initFirebase() {
+  if (!window.__FIREBASE_CONFIG || !window.__FIREBASE_CONFIG.apiKey) return;
+  if (typeof firebase === "undefined") { setTimeout(initFirebase, 500); return; }
   try {
-    const res = await fetch(`${window.location.origin}/api/materials/session`, { method: "POST" });
-    const data = await res.json();
-    if (data.materialsId) {
-      window.__materialsId = data.materialsId;
-      return data.materialsId;
-    }
-  } catch (_) {}
-  return null;
+    if (!firebase.apps.length) firebase.initializeApp(window.__FIREBASE_CONFIG);
+    firebase.auth().signInAnonymously().catch(e => console.warn("[Dasko] Firebase auth:", e));
+    db = firebase.firestore();
+    console.log("[Dasko] Firebase initialized");
+  } catch (e) { console.warn("[Dasko] Firebase init:", e); }
 }
 
-function renderMaterialsFileList(files) {
-  if (!materialsFileListEl) return;
-  materialsFileListEl.innerHTML = "";
-  if (!files || !files.length) return;
-  files.forEach((f) => {
-    const li = document.createElement("li");
-    li.className = "materials-file-item";
-    li.innerHTML = `<span class="materials-file-name">${escapeHtml(f.name)}</span>`;
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "materials-file-remove";
-    btn.textContent = "Remove";
-    btn.addEventListener("click", async () => {
-      const id = window.__materialsId;
-      if (!id) return;
-      await fetch(`${window.location.origin}/api/materials/${id}/file/${f.storedName}`, {
-        method: "DELETE",
-      });
-      const r = await fetch(`${window.location.origin}/api/materials/${id}`);
-      const j = await r.json();
-      renderMaterialsFileList(j.files || []);
-    });
-    li.appendChild(btn);
-    materialsFileListEl.appendChild(li);
-  });
-}
-
-async function uploadFileToMaterialsSession(file) {
-  if (!file) return;
-  const id = await ensureMaterialsSession();
-  if (!id) {
-    setMaterialsStatus("Could not start materials session.", true);
-    return;
-  }
-  setMaterialsStatus(`Storing ${file.name}…`);
+async function saveSession(data) {
+  if (!db) return;
   try {
-    const fd = new FormData();
-    fd.append("materialsId", id);
-    fd.append("file", file);
-    const res = await fetch(`${window.location.origin}/api/materials/upload`, {
-      method: "POST",
-      body: fd,
+    const user = firebase.auth().currentUser;
+    await db.collection("sessions").add({
+      ...data,
+      userId: user?.uid || "anonymous",
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
     });
-    const data = await res.json();
-    if (!res.ok) {
-      setMaterialsStatus(data.error || "Upload failed", true);
-      return;
-    }
-    renderMaterialsFileList(data.files || []);
-    setMaterialsStatus(`Attached: ${data.filename} — students will use it as notes.`);
-  } catch (e) {
-    setMaterialsStatus(e.message || "Upload failed", true);
-  }
+    console.log("[Dasko] Session saved to Firebase");
+  } catch (e) { console.warn("[Dasko] Firebase save:", e); }
 }
 
-function initMaterialsDropzone() {
-  if (!materialsDropzone || !materialsFileInput) return;
-  ensureMaterialsSession().then((id) => {
-    if (id) {
-      fetch(`${window.location.origin}/api/materials/${id}`)
-        .then((r) => r.json())
-        .then((j) => renderMaterialsFileList(j.files || []))
-        .catch(() => {});
-    }
-  });
-
-  const inner = materialsDropzone.querySelector(".materials-dropzone-inner");
-  const openPicker = () => materialsFileInput.click();
-  if (inner) {
-    inner.addEventListener("click", (e) => {
-      if (e.target === materialsNotesEl) return;
-      openPicker();
-    });
-  }
-  materialsFileInput.addEventListener("change", () => {
-    const files = materialsFileInput.files;
-    if (!files || !files.length) return;
-    Array.from(files).forEach((f) => uploadFileToMaterialsSession(f));
-    materialsFileInput.value = "";
-  });
-  ["dragenter", "dragover"].forEach((ev) => {
-    materialsDropzone.addEventListener(ev, (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      materialsDropzone.classList.add("dragover");
-    });
-  });
-  ["dragleave", "drop"].forEach((ev) => {
-    materialsDropzone.addEventListener(ev, (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      materialsDropzone.classList.remove("dragover");
-    });
-  });
-  materialsDropzone.addEventListener("drop", (e) => {
-    const files = e.dataTransfer && e.dataTransfer.files;
-    if (files && files.length) Array.from(files).forEach((f) => uploadFileToMaterialsSession(f));
-  });
-}
-
-// ── Boot ───────────────────────────────────────────────────────────────────────
-initWhiteboardUI();
-initMaterialsDropzone();
+// ── Boot ─────────────────────────────────────────────────────────────────────
 loadTopics();
+initFirebase();
