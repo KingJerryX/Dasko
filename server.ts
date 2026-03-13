@@ -778,6 +778,15 @@ async function main() {
           if (parsed.type === 'video_frame' && typeof parsed.base64 === 'string') {
             sessionMap.forEach(sess => { try { sess.sendRealtimeInput({ media: { data: parsed.base64, mimeType: 'image/jpeg' } }); } catch (_) {} });
           }
+          if (parsed.type === 'material_file' && parsed.base64 && parsed.mimeType) {
+            console.log(`[Dasko] Received study material: ${parsed.name} (${parsed.mimeType})`);
+            sessionMap.forEach(sess => {
+              try {
+                sess.sendRealtimeInput({ media: { data: parsed.base64, mimeType: parsed.mimeType } });
+                sess.sendRealtimeInput({ text: `[The teacher has shared a study material file: "${parsed.name}". Review it carefully — you may be quizzed on this content during the lesson.]` });
+              } catch (_) {}
+            });
+          }
         } catch (_) {}
       });
 
@@ -892,6 +901,13 @@ async function main() {
             session.sendRealtimeInput({
               media: { data: msg.base64, mimeType: 'image/jpeg' },
             });
+          }
+          if (msg.type === 'material_file' && msg.base64 && msg.mimeType) {
+            console.log(`[Dasko] Received study material: ${msg.name} (${msg.mimeType})`);
+            try {
+              session.sendRealtimeInput({ media: { data: msg.base64, mimeType: msg.mimeType } });
+              session.sendRealtimeInput({ text: `[The teacher has shared a study material file: "${msg.name}". Review it carefully — you may be quizzed on this content during the lesson.]` });
+            } catch (_) {}
           }
         } catch (_) {}
         return;
