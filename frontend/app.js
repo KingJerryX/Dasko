@@ -56,6 +56,7 @@ const reflectionStrengths  = document.getElementById("reflectionStrengths");
 const reflectionGaps       = document.getElementById("reflectionGaps");
 const reflectionQuestions  = document.getElementById("reflectionQuestions");
 const reflectionImprovements = document.getElementById("reflectionImprovements");
+const reflectionSkills = document.getElementById("reflectionSkills");
 const teachAgainBtn   = document.getElementById("teachAgainBtn");
 const changeTopicBtn  = document.getElementById("changeTopicBtn");
 
@@ -988,13 +989,18 @@ function showReflection(data) {
   fillList(reflectionGaps, data.gaps);
   fillList(reflectionQuestions, data.topQuestions);
   fillList(reflectionImprovements, data.improvements);
+  fillList(reflectionSkills, data.presentationSkills);
 
   // Save to Firebase
   saveSession({ topic: sessionTopic, reflection: data, duration: sessionDuration });
 }
 
 function disconnect(keepScreen = false) {
-  if (ws) { try { ws.close(); } catch (_) {} ws = null; }
+  if (ws) {
+    ws.onclose = null;
+    try { ws.close(); } catch (_) {}
+    ws = null;
+  }
   if (micProcessor) { try { micProcessor.disconnect(); } catch (_) {} micProcessor = null; }
   if (micStream) { micStream.getAudioTracks().forEach(t => t.stop()); micStream = null; }
   if (micContext) { try { micContext.close(); } catch (_) {} micContext = null; }
@@ -1105,6 +1111,7 @@ async function connect() {
 
       // Teacher transcript (from Gemini inputAudioTranscription)
       if (msg.type === "teacher_transcript" && msg.text) {
+        currentStudentEntry = null;
         if (!currentTeacherEntry) {
           currentTeacherEntry = addTranscriptEntry("You", "teacher");
         }
@@ -1113,6 +1120,7 @@ async function connect() {
 
       // Student transcript
       if (msg.type === "transcript" && msg.text) {
+        currentTeacherEntry = null;
         if (!currentStudentEntry) {
           const speaker = classroomMode ? (activeSpeakerName || "Student") : "Student";
           currentStudentEntry = addTranscriptEntry(speaker, "student");

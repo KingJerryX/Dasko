@@ -297,6 +297,7 @@ async function generateReflection(
       gaps: [],
       topQuestions: [],
       improvements: ['Try a longer session — aim for at least 5 minutes of explanation.'],
+      presentationSkills: [],
     };
   }
 
@@ -317,7 +318,8 @@ async function generateReflection(
           `- "strengths": string[] — 2-3 specific things the teacher did well\n` +
           `- "gaps": string[] — 2-3 concepts that were missed, skipped, or explained unclearly (empty array if none)\n` +
           `- "topQuestions": string[] — the 3 most insightful student questions verbatim (fewer if session was short)\n` +
-          `- "improvements": string[] — 2-3 concrete, actionable suggestions for next time\n\n` +
+          `- "improvements": string[] — 2-3 concrete, actionable suggestions for next time\n` +
+          `- "presentationSkills": string[] — 1-2 bullet points on their speaking and presentation delivery (pacing, clarity, confidence)\n\n` +
           `Return ONLY valid JSON. No extra text.`
         }]
       }],
@@ -333,6 +335,7 @@ async function generateReflection(
       gaps: [],
       topQuestions: [],
       improvements: [],
+      presentationSkills: [],
     };
   }
 }
