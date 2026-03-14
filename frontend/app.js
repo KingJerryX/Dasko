@@ -9,6 +9,7 @@ const sessionScreen   = document.getElementById("session-screen");
 const reflectionScreen = document.getElementById("reflection-screen");
 const getStartedBtn   = document.getElementById("getStartedBtn");
 const customTopic     = document.getElementById("customTopic");
+const sessionLanguageEl = document.getElementById("sessionLanguage");
 const materialsEl     = document.getElementById("materials");
 const useCameraEl     = document.getElementById("useCamera");
 const useWhiteboardEl = document.getElementById("useWhiteboard");
@@ -21,6 +22,7 @@ const sessionTopicLabel = document.getElementById("sessionTopicLabel");
 const sessionTimer    = document.getElementById("sessionTimer");
 const statusDot       = document.getElementById("statusDot");
 const statusText      = document.getElementById("statusText");
+const sessionHomeBtn  = document.getElementById("sessionHomeBtn");
 const modeTabSolo     = document.getElementById("modeTabSolo");
 const modeTabClassroom = document.getElementById("modeTabClassroom");
 const soloSection     = document.getElementById("soloSection");
@@ -47,6 +49,8 @@ const screenContainer = document.getElementById("screenContainer");
 const screenFeed      = document.getElementById("screenFeed");
 const screenToggleBtn = document.getElementById("screenToggleBtn");
 const wbToolbar       = document.getElementById("wbToolbar");
+const wbFullscreenBtn = document.getElementById("wbFullscreenBtn");
+const wbResetViewBtn  = document.getElementById("wbResetViewBtn");
 const transcriptBody  = document.getElementById("transcriptBody");
 const coachingBody    = document.getElementById("coachingBody");
 const reflectionSummary    = document.getElementById("reflectionSummary");
@@ -66,6 +70,7 @@ const resizerLeft      = document.getElementById("resizerLeft");
 const resizerRight     = document.getElementById("resizerRight");
 const toggleTranscriptBtn = document.getElementById("toggleTranscriptBtn");
 const toggleCoachingBtn   = document.getElementById("toggleCoachingBtn");
+const cameraDragHandle    = document.getElementById("cameraDragHandle");
 const uploadMaterialBtn   = document.getElementById("uploadMaterialBtn");
 const sessionFileInput    = document.getElementById("sessionFileInput");
 const sessionToast        = document.getElementById("sessionToast");
@@ -135,6 +140,29 @@ let currentColor = "#000000";
 let canvasDirty  = false;
 let wbDrawing    = false;
 let wbLastX = 0, wbLastY = 0;
+let wbPenSize    = 3;
+let wbEraserSize = 30;
+let wbZoom       = 1;
+let wbPanX       = 0;
+let wbPanY       = 0;
+let wbIsPanning  = false;
+let wbPanClientStartX = 0;
+let wbPanClientStartY = 0;
+let wbPanOriginX = 0;
+let wbPanOriginY = 0;
+let wbEventsBound = false;
+
+// Fullscreen and overlays
+let wbCssFullscreen = false;
+
+// Camera floating PiP
+let cameraDragging = false;
+let cameraDragStartX = 0;
+let cameraDragStartY = 0;
+let cameraStartLeft = 0;
+let cameraStartTop = 0;
+let cameraFloatLeft = 0;
+let cameraFloatTop = 0;
 
 // Frame sending
 let frameInterval   = null;
@@ -149,6 +177,7 @@ let currentStudentEntry = null;
 
 // Session state
 let sessionTopic     = "";
+let sessionLanguage  = "English";
 let sessionMaterials = "";
 let sessionStartTime = 0;
 let sessionDuration  = 0;
@@ -421,6 +450,11 @@ function escapeHtml(s) { const d = document.createElement("div"); d.textContent 
 
 function getSelectedTopic() {
   return customTopic.value.trim() || "the topic";
+}
+
+function getSessionLanguage() {
+  const value = sessionLanguageEl?.value?.trim();
+  return value || "English";
 }
 
 // ── File upload handling ──────────────────────────────────────────────────────
@@ -784,24 +818,67 @@ function initWhiteboard() {
   const ctx = whiteboardCanvas.getContext("2d");
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, whiteboardCanvas.width, whiteboardCanvas.height);
+  applyWbTransform();
   setupWhiteboardEvents();
 }
 
 function setupWhiteboardEvents() {
+  if (wbEventsBound) return;
+  wbEventsBound = true;
   const canvas = whiteboardCanvas;
+  const container = canvas.parentElement;
+  if (!canvas || !container) return;
+
+  function getClientPoint(e) {
+    const touch = e.touches?.[0] || e.changedTouches?.[0];
+    return {
+      x: touch ? touch.clientX : e.clientX,
+      y: touch ? touch.clientY : e.clientY,
+    };
+  }
+
+  function getPosFromClient(clientX, clientY) {
+    const rect = container.getBoundingClientRect();
+    const baseScaleX = canvas.width / rect.width;
+    const baseScaleY = canvas.height / rect.height;
+    const localX = (clientX - rect.left - wbPanX) / wbZoom;
+    const localY = (clientY - rect.top - wbPanY) / wbZoom;
+    return { x: localX * baseScaleX, y: localY * baseScaleY };
+  }
 
   function getPos(e) {
-    const rect = canvas.getBoundingClientRect();
-    const sx = canvas.width / rect.width;
-    const sy = canvas.height / rect.height;
-    const cx = e.touches ? e.touches[0].clientX : e.clientX;
-    const cy = e.touches ? e.touches[0].clientY : e.clientY;
-    return { x: (cx - rect.left) * sx, y: (cy - rect.top) * sy };
+    const point = getClientPoint(e);
+    return getPosFromClient(point.x, point.y);
+  }
+
+  function startPan(clientX, clientY) {
+    if (!whiteboardEnabled) return;
+    if (!wbIsPanning) {
+      wbIsPanning = true;
+      wbPanClientStartX = clientX;
+      wbPanClientStartY = clientY;
+      wbPanOriginX = wbPanX;
+      wbPanOriginY = wbPanY;
+      canvas.style.cursor = "grabbing";
+    }
   }
 
   function onStart(e) {
-    e.preventDefault();
+    if (!whiteboardEnabled) return;
+    const point = getClientPoint(e);
+    const isRightMouse = e.type === "mousedown" && e.button === 2;
+    const isPanTool = currentTool === "pan" && (e.type === "touchstart" || e.button === 0);
+
+    if (isRightMouse || isPanTool) {
+      e.preventDefault();
+      startPan(point.x, point.y);
+      return;
+    }
+
+    if (e.type === "mousedown" && e.button !== 0) return;
+
     if (currentTool === "text") {
+      e.preventDefault();
       const pos = getPos(e);
       const text = prompt("Enter text:");
       if (text) {
@@ -813,17 +890,28 @@ function setupWhiteboardEvents() {
       }
       return;
     }
+
+    e.preventDefault();
     wbDrawing = true;
     const pos = getPos(e);
     wbLastX = pos.x; wbLastY = pos.y;
   }
 
   function onMove(e) {
+    if (!whiteboardEnabled) return;
+    if (wbIsPanning) {
+      e.preventDefault();
+      const point = getClientPoint(e);
+      wbPanX = wbPanOriginX + (point.x - wbPanClientStartX);
+      wbPanY = wbPanOriginY + (point.y - wbPanClientStartY);
+      applyWbTransform();
+      return;
+    }
     if (!wbDrawing) return;
     e.preventDefault();
     const pos = getPos(e);
     const ctx = canvas.getContext("2d");
-    ctx.lineWidth = currentTool === "eraser" ? 30 : 3;
+    ctx.lineWidth = currentTool === "eraser" ? wbEraserSize : wbPenSize;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.strokeStyle = currentTool === "eraser" ? "#ffffff" : currentColor;
@@ -835,15 +923,54 @@ function setupWhiteboardEvents() {
     canvasDirty = true;
   }
 
-  function onEnd() { wbDrawing = false; }
+  function onEnd() {
+    wbDrawing = false;
+    if (wbIsPanning) {
+      wbIsPanning = false;
+      canvas.style.cursor = currentTool === "pan" ? "grab" : "crosshair";
+    }
+  }
 
   canvas.addEventListener("mousedown", onStart);
   canvas.addEventListener("mousemove", onMove);
   canvas.addEventListener("mouseup", onEnd);
   canvas.addEventListener("mouseleave", onEnd);
+  canvas.addEventListener("contextmenu", (e) => {
+    if (whiteboardEnabled) e.preventDefault();
+  });
+  document.addEventListener("mouseup", onEnd);
   canvas.addEventListener("touchstart", onStart, { passive: false });
   canvas.addEventListener("touchmove", onMove, { passive: false });
   canvas.addEventListener("touchend", onEnd);
+
+  // Zoom with wheel, anchored at pointer position.
+  container.addEventListener("wheel", (e) => {
+    if (!whiteboardEnabled) return;
+    e.preventDefault();
+    const rect = container.getBoundingClientRect();
+    const localX = e.clientX - rect.left;
+    const localY = e.clientY - rect.top;
+    const logicalX = (localX - wbPanX) / wbZoom;
+    const logicalY = (localY - wbPanY) / wbZoom;
+    const scaleDelta = e.deltaY > 0 ? 0.92 : 1.08;
+    wbZoom = Math.max(0.25, Math.min(5, wbZoom * scaleDelta));
+    wbPanX = localX - logicalX * wbZoom;
+    wbPanY = localY - logicalY * wbZoom;
+    applyWbTransform();
+  }, { passive: false });
+}
+
+function applyWbTransform() {
+  if (!whiteboardCanvas) return;
+  whiteboardCanvas.style.transformOrigin = "0 0";
+  whiteboardCanvas.style.transform = `translate(${wbPanX}px, ${wbPanY}px) scale(${wbZoom})`;
+}
+
+function resetWhiteboardView() {
+  wbZoom = 1;
+  wbPanX = 0;
+  wbPanY = 0;
+  applyWbTransform();
 }
 
 function clearWhiteboard() {
@@ -854,12 +981,29 @@ function clearWhiteboard() {
 }
 
 // Whiteboard toolbar events
+function updateWbSizeSliders() {
+  const isPen = currentTool === "pen";
+  const isEraser = currentTool === "eraser";
+  const penWrap = document.getElementById("wbPenSizeWrap");
+  const eraserWrap = document.getElementById("wbEraserSizeWrap");
+  const sep = document.getElementById("wbSizeSep");
+  if (penWrap) penWrap.classList.toggle("visible", isPen);
+  if (eraserWrap) eraserWrap.classList.toggle("visible", isEraser);
+  if (sep) sep.style.display = (isPen || isEraser) ? "" : "none";
+  // Update cursor for pan tool
+  if (whiteboardCanvas) {
+    whiteboardCanvas.style.cursor = currentTool === "pan" ? "grab" : "crosshair";
+  }
+}
+
 document.querySelectorAll(".wb-btn").forEach(btn => {
   btn.addEventListener("click", () => {
     const tool = btn.dataset.tool;
+    if (!tool) return;
     if (tool === "clear") { clearWhiteboard(); return; }
     currentTool = tool;
     document.querySelectorAll(".wb-btn").forEach(b => b.classList.toggle("active", b.dataset.tool === tool));
+    updateWbSizeSliders();
   });
 });
 
@@ -867,11 +1011,107 @@ document.querySelectorAll(".wb-color").forEach(swatch => {
   swatch.addEventListener("click", () => {
     currentColor = swatch.dataset.color;
     document.querySelectorAll(".wb-color").forEach(s => s.classList.toggle("active", s === swatch));
-    if (currentTool === "eraser") {
+    // Deactivate custom color picker border
+    const customWrap = document.querySelector(".wb-color-custom");
+    if (customWrap) customWrap.style.borderColor = "transparent";
+    if (currentTool === "eraser" || currentTool === "pan") {
       currentTool = "pen";
       document.querySelectorAll(".wb-btn").forEach(b => b.classList.toggle("active", b.dataset.tool === "pen"));
+      updateWbSizeSliders();
     }
   });
+});
+
+// Custom color picker (null-guarded)
+(function() {
+  const picker = document.getElementById("wbColorPicker");
+  if (!picker) return;
+  picker.addEventListener("input", (e) => {
+    currentColor = e.target.value;
+    document.querySelectorAll(".wb-color").forEach(s => s.classList.remove("active"));
+    const customWrap = document.querySelector(".wb-color-custom");
+    if (customWrap) customWrap.style.borderColor = "#111827";
+    if (currentTool === "eraser" || currentTool === "pan") {
+      currentTool = "pen";
+      document.querySelectorAll(".wb-btn").forEach(b => b.classList.toggle("active", b.dataset.tool === "pen"));
+      updateWbSizeSliders();
+    }
+  });
+})();
+
+// Pen size slider (null-guarded)
+(function() {
+  const slider = document.getElementById("wbPenSize");
+  const label = document.getElementById("wbPenSizeLabel");
+  if (!slider) return;
+  slider.addEventListener("input", (e) => {
+    wbPenSize = Number(e.target.value);
+    if (label) label.textContent = wbPenSize;
+  });
+})();
+
+// Eraser size slider (null-guarded)
+(function() {
+  const slider = document.getElementById("wbEraserSize");
+  const label = document.getElementById("wbEraserSizeLabel");
+  if (!slider) return;
+  slider.addEventListener("input", (e) => {
+    wbEraserSize = Number(e.target.value);
+    if (label) label.textContent = wbEraserSize;
+  });
+})();
+
+function isWbFullscreenActive() {
+  return !!(document.fullscreenElement === sessionScreen || wbCssFullscreen);
+}
+
+function syncWbFullscreenUi() {
+  const active = isWbFullscreenActive();
+  mediaContainer.classList.toggle("wb-fullscreen", active);
+  sessionScreen.classList.toggle("wb-overlay-active", active);
+  if (active) {
+    transcriptCollapsed = false;
+    coachingCollapsed = false;
+  }
+  applyPanelWidths();
+  if (wbFullscreenBtn) wbFullscreenBtn.textContent = active ? "\u2716" : "\u26F6";
+  updateMediaLayout();
+}
+
+async function setWbFullscreen(enabled) {
+  if (!mediaContainer) return;
+  if (enabled) {
+    wbCssFullscreen = false;
+    if (!document.fullscreenElement && sessionScreen?.requestFullscreen) {
+      try {
+        // Fullscreen the whole session so transcript/tips overlays stay visible.
+        await sessionScreen.requestFullscreen();
+      } catch (_) {
+        wbCssFullscreen = true;
+      }
+    } else if (!document.fullscreenElement) {
+      wbCssFullscreen = true;
+    }
+  } else {
+    wbCssFullscreen = false;
+    if (document.fullscreenElement && document.exitFullscreen) {
+      try { await document.exitFullscreen(); } catch (_) {}
+    }
+  }
+  syncWbFullscreenUi();
+}
+
+if (wbFullscreenBtn) {
+  wbFullscreenBtn.addEventListener("click", () => {
+    setWbFullscreen(!isWbFullscreenActive());
+  });
+}
+if (wbResetViewBtn) {
+  wbResetViewBtn.addEventListener("click", resetWhiteboardView);
+}
+document.addEventListener("fullscreenchange", syncWbFullscreenUi);
+window.addEventListener("resize", () => {
+  applyCameraPosition();
 });
 
 // ── Camera management ────────────────────────────────────────────────────────
@@ -913,6 +1153,98 @@ function stopScreenShare() {
   screenFeed.srcObject = null;
 }
 
+function getCameraBounds() {
+  if (isWbFullscreenActive()) {
+    const margin = 12;
+    return {
+      minX: margin,
+      minY: 72,
+      maxX: window.innerWidth - cameraContainer.offsetWidth - margin,
+      maxY: window.innerHeight - cameraContainer.offsetHeight - 84,
+    };
+  }
+  const hostRect = sessionCenter.getBoundingClientRect();
+  const margin = 10;
+  return {
+    minX: margin,
+    minY: margin,
+    maxX: Math.max(margin, hostRect.width - cameraContainer.offsetWidth - margin),
+    maxY: Math.max(margin, hostRect.height - cameraContainer.offsetHeight - margin),
+  };
+}
+
+function applyCameraPosition() {
+  if (!cameraContainer.classList.contains("floating")) return;
+  const b = getCameraBounds();
+  cameraFloatLeft = Math.min(b.maxX, Math.max(b.minX, cameraFloatLeft));
+  cameraFloatTop = Math.min(b.maxY, Math.max(b.minY, cameraFloatTop));
+  cameraContainer.style.left = `${cameraFloatLeft}px`;
+  cameraContainer.style.top = `${cameraFloatTop}px`;
+}
+
+function enableCameraFloating() {
+  if (!cameraContainer.classList.contains("floating")) {
+    cameraContainer.classList.add("floating");
+    sessionCenter.classList.add("camera-floating-host");
+    if (!cameraFloatLeft && !cameraFloatTop) {
+      cameraFloatLeft = 20;
+      cameraFloatTop = 20;
+    }
+  }
+  cameraContainer.classList.toggle("fullscreen-floating", isWbFullscreenActive());
+  applyCameraPosition();
+}
+
+function disableCameraFloating() {
+  cameraContainer.classList.remove("floating", "fullscreen-floating");
+  sessionCenter.classList.remove("camera-floating-host");
+  cameraContainer.style.left = "";
+  cameraContainer.style.top = "";
+  cameraDragging = false;
+}
+
+function setupCameraDrag() {
+  if (!cameraContainer || !cameraDragHandle) return;
+
+  const dragStart = (clientX, clientY) => {
+    if (!cameraContainer.classList.contains("floating")) return;
+    cameraDragging = true;
+    cameraDragStartX = clientX;
+    cameraDragStartY = clientY;
+    cameraStartLeft = cameraFloatLeft;
+    cameraStartTop = cameraFloatTop;
+  };
+  const dragMove = (clientX, clientY) => {
+    if (!cameraDragging) return;
+    cameraFloatLeft = cameraStartLeft + (clientX - cameraDragStartX);
+    cameraFloatTop = cameraStartTop + (clientY - cameraDragStartY);
+    applyCameraPosition();
+  };
+  const dragEnd = () => { cameraDragging = false; };
+
+  cameraDragHandle.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    dragStart(e.clientX, e.clientY);
+  });
+  cameraDragHandle.addEventListener("touchstart", (e) => {
+    const touch = e.touches?.[0];
+    if (!touch) return;
+    e.preventDefault();
+    dragStart(touch.clientX, touch.clientY);
+  }, { passive: false });
+
+  document.addEventListener("mousemove", (e) => dragMove(e.clientX, e.clientY));
+  document.addEventListener("mouseup", dragEnd);
+  document.addEventListener("touchmove", (e) => {
+    const touch = e.touches?.[0];
+    if (!touch) return;
+    if (!cameraDragging) return;
+    e.preventDefault();
+    dragMove(touch.clientX, touch.clientY);
+  }, { passive: false });
+  document.addEventListener("touchend", dragEnd);
+}
+
 // ── Media layout ─────────────────────────────────────────────────────────────
 const sessionCenter = document.querySelector(".session-center");
 
@@ -933,6 +1265,9 @@ function updateMediaLayout() {
 
   // Camera self-view in center column (only show after session is ready)
   cameraContainer.classList.toggle("visible", sessionReady && cameraEnabled);
+  const shouldFloatCamera = sessionReady && cameraEnabled && (whiteboardEnabled || screenEnabled || isWbFullscreenActive());
+  if (shouldFloatCamera) enableCameraFloating();
+  else disableCameraFloating();
 
   // Layout modes: dual-media when 2 sources, triple-media when all 3
   sessionCenter.classList.toggle("dual-media", dualMedia);
@@ -1071,6 +1406,7 @@ function setupSessionFileDrop() {
 }
 setupSessionFileDrop();
 setupPanelResizers();
+setupCameraDrag();
 
 // ── Frame sending: composite camera/screen + whiteboard so AI sees board ────
 function startFrameSending() {
@@ -1365,6 +1701,7 @@ function setProTip() {
 function showSetup() {
   sessionScreen.style.display = "none";
   reflectionScreen.style.display = "none";
+  landingScreen.style.display = "none";
   sessionScreen.classList.remove("classroom-mode");
   setupScreen.style.display = "block";
   loadRecentSessions();
@@ -1375,6 +1712,15 @@ function showSetup() {
   updateStartButton();
   setOrbState("idle");
   stopBtn.disabled = false;
+}
+
+function showLanding() {
+  sessionScreen.style.display = "none";
+  setupScreen.style.display = "none";
+  reflectionScreen.style.display = "none";
+  if (reflectionLoadingScreen) reflectionLoadingScreen.classList.remove("visible");
+  landingScreen.style.display = "flex";
+  landingScreen.classList.remove("fade-out");
 }
 
 function showReflection(data) {
@@ -1522,6 +1868,9 @@ function disconnect(keepScreen = false) {
   activeSpeakerName = "";
   awaitingReflection = false;
   whiteboardInited = false;
+  resetWhiteboardView();
+  setWbFullscreen(false);
+  disableCameraFloating();
 
   if (!keepScreen) {
     if (lastError) setStatus(lastError, "error");
@@ -1534,6 +1883,7 @@ async function connect() {
   awaitingReflection = false;
   stopSetupHardware();
   sessionTopic = getSelectedTopic();
+  sessionLanguage = getSessionLanguage();
   sessionMaterials = materialsEl.value.trim();
   cameraEnabled = useCameraEl.checked;
   whiteboardEnabled = useWhiteboardEl.checked;
@@ -1562,6 +1912,7 @@ async function connect() {
   const url = `${protocol}//${location.host}/ws/live`
     + `?topic=${encodeURIComponent(sessionTopic)}`
     + `&persona=${encodeURIComponent(selectedPersona)}`
+    + `&language=${encodeURIComponent(sessionLanguage)}`
     + `&video=${useVideo ? "1" : "0"}`
     + `&classroom=${classroomMode ? "1" : "0"}`
     + (studentsParam ? `&students=${encodeURIComponent(studentsParam)}` : "")
@@ -1812,6 +2163,8 @@ wbToggleBtn.addEventListener("click", () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
       try { ws.send(JSON.stringify({ type: "whiteboard_opened" })); } catch (_) {}
     }
+  } else if (isWbFullscreenActive()) {
+    setWbFullscreen(false);
   }
   updateMediaLayout();
 });
@@ -1901,3 +2254,10 @@ async function saveSession(data) {
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
 initFirebase();
+
+if (sessionHomeBtn) {
+  sessionHomeBtn.addEventListener("click", () => {
+    disconnect(true);
+    showLanding();
+  });
+}

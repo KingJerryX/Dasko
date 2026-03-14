@@ -76,7 +76,29 @@ This is a voice-only session. You can only hear the teacher.
 
 **Non-verbal sounds:** Treat "mhm", "mm-hmm", "uh-huh" and similar back-channel sounds as agreement or acknowledgment — the same as "yes" or "I'm following". Respond accordingly without requiring the teacher to say full sentences.`;
 
-function getClassroomInstruction(topic: string, studentIds: string[], materials: string, video: boolean): string {
+const ALLOWED_SESSION_LANGUAGES = new Set([
+  'English',
+  'Spanish',
+  'French',
+  'German',
+  'Portuguese',
+  'Hindi',
+  'Arabic',
+  'Mandarin Chinese',
+]);
+
+function normalizeSessionLanguage(raw: string | null): string {
+  const value = (raw || '').trim();
+  return ALLOWED_SESSION_LANGUAGES.has(value) ? value : 'English';
+}
+
+function languageInstruction(language: string): string {
+  return `## Language
+Use ${language} for your spoken responses in this session.
+Keep terminology natural for ${language}.`;
+}
+
+function getClassroomInstruction(topic: string, studentIds: string[], materials: string, video: boolean, language: string): string {
   const studentList = studentIds
     .filter(id => STUDENT_PROFILES[id])
     .map(id => `- **${id.charAt(0).toUpperCase() + id.slice(1)}**: ${STUDENT_PROFILES[id]}`)
@@ -99,6 +121,8 @@ The teacher may share files during the lesson (handouts, images, slides). When y
 
 ## Senses
 ${video ? GESTURE_INSTRUCTION.trim() : GESTURE_INSTRUCTION_VOICE_ONLY.trim()}
+
+${languageInstruction(language)}
 
 ## CRITICAL: Formatting rule
 You MUST begin every single response with the speaking student's name followed by a colon and space.
@@ -124,7 +148,7 @@ const PERSONA_TRAITS: Record<string, string> = {
   confused: `You get lost easily and need things broken down step by step. You often circle back to earlier points, ask "wait, can you say that differently?", and need concrete real-world examples before abstract ideas land. You're not slow — you just have high standards for your own understanding.`,
 };
 
-function getStudentInstruction(topic: string, persona: string, materials: string, video: boolean): string {
+function getStudentInstruction(topic: string, persona: string, materials: string, video: boolean, language: string): string {
   const personaTrait = PERSONA_TRAITS[persona] || PERSONA_TRAITS.eager;
 
   const materialsSection = materials.trim()
@@ -168,11 +192,13 @@ You are NOT a blank slate. You come in with partial knowledge, possible misconce
 
 ${video ? GESTURE_INSTRUCTION.trim() : GESTURE_INSTRUCTION_VOICE_ONLY.trim()}
 
+${languageInstruction(language)}
+
 ## Starting the session
 Your very first response must be a short spoken greeting (e.g. "Hi, ready when you are"). Do not say you cannot see or hear the teacher—greet them and indicate you're ready to listen.`;
 }
 
-function getClassroomStudentInstruction(topic: string, studentId: string, allStudentIds: string[], materials: string, video: boolean): string {
+function getClassroomStudentInstruction(topic: string, studentId: string, allStudentIds: string[], materials: string, video: boolean, language: string): string {
   const name    = studentId.charAt(0).toUpperCase() + studentId.slice(1);
   const profile = STUDENT_PROFILES[studentId] || '';
 
@@ -233,6 +259,8 @@ The teacher may share files during the lesson. When you receive a message that t
 - Stay on topic.
 
 ${video ? GESTURE_INSTRUCTION.trim() : GESTURE_INSTRUCTION_VOICE_ONLY.trim()}
+
+${languageInstruction(language)}
 
 ## Starting
 Your very first response must be a short spoken greeting. Do not say you cannot see or hear the teacher—greet them and indicate you're ready to listen.`;
@@ -590,6 +618,7 @@ async function main() {
 
     const topic      = url.searchParams.get('topic')     || 'the topic the teacher will explain';
     const persona    = url.searchParams.get('persona')   || 'eager';
+    const language   = normalizeSessionLanguage(url.searchParams.get('language'));
     let materials  = url.searchParams.get('materials') || '';
     const materialsId = url.searchParams.get('materialsId') || '';
     if (materialsId) {
@@ -606,7 +635,7 @@ async function main() {
       .split(',').map(s => s.trim()).filter(s => STUDENT_PROFILES[s]);
     const model      = video ? VIDEO_MODEL : AUDIO_MODEL;
 
-    console.log('[Dasko] New session | topic:', topic, '| persona:', persona, '| video:', video, '| classroom:', classroom, studentIds);
+    console.log('[Dasko] New session | topic:', topic, '| persona:', persona, '| language:', language, '| video:', video, '| classroom:', classroom, studentIds);
 
     // ── Per-session state ──────────────────────────────────────────────────
     const sessionLog: SessionEntry[] = [];
@@ -713,7 +742,7 @@ async function main() {
             outputAudioTranscription: {},
             inputAudioTranscription:  {},
             speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
-            systemInstruction: getClassroomStudentInstruction(topic, id, studentIds, fullMaterials, video),
+            systemInstruction: getClassroomStudentInstruction(topic, id, studentIds, fullMaterials, video, language),
           };
 
           const sess = await ai.live.connect({
@@ -726,7 +755,11 @@ async function main() {
                   sendJson({ type: 'session_ready' });
                   sendJson({ type: 'info', message: `Your classroom is ready. Start explaining: ${topic}` });
                   setTimeout(() => {
-                    try { sess.sendRealtimeInput({ text: `The teacher has just walked in. Say a short greeting out loud right now (e.g. "Hi, we're ready when you are"). Your first response must be this greeting—do not skip it.` }); } catch (_) {}
+                    try {
+                      sess.sendRealtimeInput({
+                        text: `The teacher has just walked in. Say a short greeting out loud in ${language} right now (e.g. "Hi, we're ready when you are"). Your first response must be this greeting—do not skip it.`,
+                      });
+                    } catch (_) {}
                   }, 400);
                 }
               },
@@ -834,7 +867,7 @@ async function main() {
         outputAudioTranscription: {},
         inputAudioTranscription:  {},
         speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } } },
-        systemInstruction: getStudentInstruction(topic, persona, fullMaterials, video),
+        systemInstruction: getStudentInstruction(topic, persona, fullMaterials, video, language),
       };
       try {
         session = await ai.live.connect({
@@ -847,7 +880,9 @@ async function main() {
               sendJson({ type: 'info', message: `Your student is ready. Start explaining: ${topic}` });
               setTimeout(() => {
                 try {
-                  session!.sendRealtimeInput({ text: `The teacher has joined. Say a short greeting out loud right now (e.g. "Hi, ready when you are" or "Hey!"). Then ask them to start explaining: ${topic}. Your first response must be this greeting—do not skip it.` });
+                  session!.sendRealtimeInput({
+                    text: `The teacher has joined. Say a short greeting out loud in ${language} right now (e.g. "Hi, ready when you are" or "Hey!"), then ask them to start explaining: ${topic}. Your first response must be this greeting—do not skip it.`,
+                  });
                 } catch (_) {}
               }, 400);
             },
