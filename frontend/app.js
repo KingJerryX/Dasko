@@ -174,6 +174,9 @@ compositeCanvas.height = 360;
 let transcriptEntryId = 0;
 let currentTeacherEntry = null;
 let currentStudentEntry = null;
+const liveCleanupTimers = new Map();
+const liveCleanupInFlight = new Map();
+const LIVE_CLEANUP_DEBOUNCE_MS = 450;
 
 // Session state
 let sessionTopic     = "";
@@ -766,17 +769,64 @@ function addTranscriptEntry(speaker, type) {
 function appendToEntry(entry, chunk, options) {
   if (!entry) return;
   const live = options && options.live !== false;
-  const t = entry.rawText;
-  if (t && !t.endsWith(" ") && !chunk.startsWith(" ") && !/^[.,!?;:]/.test(chunk)) {
-    entry.rawText += " ";
-  }
+  const predict = options && options.predict === true;
+  // Keep raw chunk boundaries from ASR to avoid inserting incorrect spaces inside words.
   entry.rawText += chunk;
   entry.textEl.textContent = live ? entry.rawText : "\u2026";
+  if (predict && live) scheduleLiveCleanup(entry);
   transcriptBody.scrollTop = transcriptBody.scrollHeight;
+}
+
+function scheduleLiveCleanup(entry) {
+  if (!entry || !entry.rawText.trim()) return;
+  const prev = liveCleanupTimers.get(entry.id);
+  if (prev) clearTimeout(prev);
+  const timer = setTimeout(() => {
+    liveCleanupTimers.delete(entry.id);
+    refineLiveTranscript(entry).catch(() => {});
+  }, LIVE_CLEANUP_DEBOUNCE_MS);
+  liveCleanupTimers.set(entry.id, timer);
+}
+
+async function refineLiveTranscript(entry) {
+  if (!entry || !entry.rawText.trim()) return;
+  if (liveCleanupInFlight.get(entry.id)) return;
+  liveCleanupInFlight.set(entry.id, true);
+  const sourceText = entry.rawText;
+  try {
+    const res = await fetch("/api/cleanup-transcript", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text: sourceText,
+        topic: sessionTopic,
+        language: sessionLanguage,
+        mode: "live",
+      }),
+    });
+    const { cleaned } = await res.json();
+    if (!cleaned || !cleaned.trim()) return;
+    // Do not clobber if new chunks arrived while we were refining.
+    if (entry.rawText !== sourceText) {
+      scheduleLiveCleanup(entry);
+      return;
+    }
+    entry.rawText = cleaned;
+    entry.textEl.textContent = cleaned;
+  } catch (_) {
+    // Ignore transient cleanup failures during streaming.
+  } finally {
+    liveCleanupInFlight.delete(entry.id);
+  }
 }
 
 async function cleanupEntry(entry, showCleaningState = true) {
   if (!entry || !entry.rawText.trim()) return;
+  const t = liveCleanupTimers.get(entry.id);
+  if (t) {
+    clearTimeout(t);
+    liveCleanupTimers.delete(entry.id);
+  }
   if (showCleaningState) entry.textEl.classList.add("cleaning");
   try {
     const res = await fetch("/api/cleanup-transcript", {
@@ -785,6 +835,8 @@ async function cleanupEntry(entry, showCleaningState = true) {
       body: JSON.stringify({
         text: entry.rawText,
         topic: sessionTopic,
+        language: sessionLanguage,
+        mode: "final",
         materials: (sessionMaterials || "").substring(0, 2000),
       }),
     });
@@ -1676,6 +1728,9 @@ function showSession(topic) {
   transcriptEntryId = 0;
   currentTeacherEntry = null;
   currentStudentEntry = null;
+  liveCleanupTimers.forEach((timer) => clearTimeout(timer));
+  liveCleanupTimers.clear();
+  liveCleanupInFlight.clear();
 
   sessionReady = false;
   if (classroomMode) createClassroomOrbs();
@@ -2059,14 +2114,14 @@ async function connect() {
         stopPlayback();
       }
 
-      // Teacher transcript: buffer and show placeholder until speech_end; then we clean and show accurate text (prioritize accuracy over live)
+      // Teacher transcript: stream partial words live and refine incrementally.
       if (msg.type === "teacher_transcript" && msg.text) {
         resetIdleTimer();
         currentStudentEntry = null;
         if (!currentTeacherEntry) {
           currentTeacherEntry = addTranscriptEntry("You", "teacher");
         }
-        appendToEntry(currentTeacherEntry, msg.text, { live: false });
+        appendToEntry(currentTeacherEntry, msg.text, { live: true, predict: true });
       }
 
       // Student transcript — close teacher's entry so student gets a new bubble below.
@@ -2077,7 +2132,7 @@ async function connect() {
           const speaker = classroomMode ? (activeSpeakerName || "Student") : "Student";
           currentStudentEntry = addTranscriptEntry(speaker, "student");
         }
-        appendToEntry(currentStudentEntry, msg.text, { live: true });
+        appendToEntry(currentStudentEntry, msg.text, { live: true, predict: true });
       }
 
       // Solo turn complete — clean student transcript in background (no gray/italic state)

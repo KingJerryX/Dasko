@@ -92,6 +92,52 @@ function normalizeSessionLanguage(raw: string | null): string {
   return ALLOWED_SESSION_LANGUAGES.has(value) ? value : 'English';
 }
 
+const SESSION_LANGUAGE_TO_BCP47: Record<string, string> = {
+  'English': 'en-US',
+  'Spanish': 'es-ES',
+  'French': 'fr-FR',
+  'German': 'de-DE',
+  'Portuguese': 'pt-BR',
+  'Hindi': 'hi-IN',
+  'Arabic': 'ar-SA',
+  'Mandarin Chinese': 'zh-CN',
+};
+
+function getTranscriptionLanguageCode(language: string): string {
+  return SESSION_LANGUAGE_TO_BCP47[language] || 'en-US';
+}
+
+function isAllowedCharForLanguage(ch: string, language: string): boolean {
+  // Whitespace and common punctuation/symbols
+  if (/\s/u.test(ch) || /\p{Script=Common}/u.test(ch) || /\p{Script=Inherited}/u.test(ch)) return true;
+  if (/\p{Number}/u.test(ch)) return true;
+
+  if (language === 'Mandarin Chinese') return /\p{Script=Han}/u.test(ch);
+  if (language === 'Hindi') return /\p{Script=Devanagari}/u.test(ch);
+  if (language === 'Arabic') return /\p{Script=Arabic}/u.test(ch);
+
+  // English/Spanish/French/German/Portuguese are Latin-script sessions.
+  return /\p{Script=Latin}/u.test(ch);
+}
+
+function enforceTranscriptLanguage(text: string, language: string): string {
+  if (!text) return text;
+  let out = '';
+  for (const ch of text) {
+    if (isAllowedCharForLanguage(ch, language)) out += ch;
+  }
+  out = out
+    .replace(/\u200B|\u200C|\u200D|\uFEFF/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Heuristic fix for split words in Latin-script sessions, e.g. "star s" -> "stars".
+  if (['English', 'Spanish', 'French', 'German', 'Portuguese'].includes(language)) {
+    out = out.replace(/\b([A-Za-zÀ-ÖØ-öø-ÿ]{2,})\s+([A-Za-zÀ-ÖØ-öø-ÿ])\b/g, '$1$2');
+  }
+  return out;
+}
+
 function languageInstruction(language: string): string {
   return `## Language
 Use ${language} for your spoken responses in this session.
@@ -123,6 +169,9 @@ The teacher may share files during the lesson (handouts, images, slides). When y
 ${video ? GESTURE_INSTRUCTION.trim() : GESTURE_INSTRUCTION_VOICE_ONLY.trim()}
 
 ${languageInstruction(language)}
+
+## Transcription language lock
+Assume the teacher is speaking ${language}. If a phrase is ambiguous, prefer the ${language} interpretation over other languages.
 
 ## CRITICAL: Formatting rule
 You MUST begin every single response with the speaking student's name followed by a colon and space.
@@ -198,6 +247,9 @@ ${video ? GESTURE_INSTRUCTION.trim() : GESTURE_INSTRUCTION_VOICE_ONLY.trim()}
 
 ${languageInstruction(language)}
 
+## Transcription language lock
+Assume the teacher is speaking ${language}. If a phrase is ambiguous, prefer the ${language} interpretation over other languages.
+
 ## Starting the session
 Your very first response must be a short spoken greeting (e.g. "Hi, ready when you are"). Do not say you cannot see or hear the teacher—greet them and indicate you're ready to listen.`;
 }
@@ -267,6 +319,9 @@ The teacher may share files during the lesson. When you receive a message that t
 ${video ? GESTURE_INSTRUCTION.trim() : GESTURE_INSTRUCTION_VOICE_ONLY.trim()}
 
 ${languageInstruction(language)}
+
+## Transcription language lock
+Assume the teacher is speaking ${language}. If a phrase is ambiguous, prefer the ${language} interpretation over other languages.
 
 ## Starting
 Your very first response must be a short spoken greeting. Do not say you cannot see or hear the teacher—greet them and indicate you're ready to listen.`;
@@ -568,10 +623,12 @@ async function main() {
     let text = '';
     let fallback = '';
     try {
-      const body = await c.req.json<{ text: string; topic: string }>();
+      const body = await c.req.json<{ text: string; topic: string; language?: string; mode?: 'live' | 'final' }>();
       fallback = body?.text || '';
       text = (body?.text || '').trim();
       const topic = body?.topic || '';
+      const language = normalizeSessionLanguage(body?.language || 'English');
+      const mode = body?.mode === 'live' ? 'live' : 'final';
       if (!text) return c.json({ cleaned: body?.text || '' });
       let result;
       try {
@@ -580,12 +637,14 @@ async function main() {
         contents: [{
           role: 'user',
           parts: [{ text:
-            `Raw speech-to-text (may have missing spaces, merged words, or wrong words). Topic: "${topic}".\n\n` +
+            `Raw speech-to-text (may have missing spaces, merged words, or wrong words). Topic: "${topic}". Language: "${language}".\n\n` +
             `Task: produce a single readable transcript that matches what a human likely said.\n` +
             `- Insert spaces between words where ASR merged them (e.g. "thewater" → "the water").\n` +
-            `- Fix homophones and technical terms using topic context.\n` +
+            `- Fix homophones and technical terms using topic context and ${language} spelling conventions.\n` +
             `- Keep the same order and meaning; do not summarize or add ideas.\n` +
-            `- Use normal punctuation and capitalization at sentence starts.\n` +
+            (mode === 'live'
+              ? `- This is a live partial stream. Keep punctuation light and preserve unfinished wording.\n`
+              : `- This is a final transcript. Use complete punctuation and capitalization.\n`) +
             `- Output plain text only, no quotes or markdown.\n\n` +
             `Transcription:\n${text}`
           }]
@@ -597,15 +656,17 @@ async function main() {
           contents: [{
             role: 'user',
             parts: [{ text:
-              `Fix this speech transcript for topic "${topic}". Insert missing spaces, fix obvious word errors. Plain text only.\n\n${text}`
+              `Fix this speech transcript for topic "${topic}" in ${language}. Insert missing spaces and obvious word errors. Keep original meaning. Plain text only.\n\n${text}`
             }]
           }],
         });
       }
-      const cleaned = (result.text?.trim() || text).replace(/\s+/g, ' ').trim();
+      const cleanedRaw = (result.text?.trim() || text).replace(/\s+/g, ' ').trim();
+      const cleaned = enforceTranscriptLanguage(cleanedRaw, language);
       return c.json({ cleaned: cleaned || text });
     } catch {
-      return c.json({ cleaned: text || fallback }, 500);
+      const fallbackCleaned = enforceTranscriptLanguage(text || fallback, language);
+      return c.json({ cleaned: fallbackCleaned || text || fallback }, 500);
     }
   });
 
@@ -640,6 +701,7 @@ async function main() {
     const studentIds = (url.searchParams.get('students') || '')
       .split(',').map(s => s.trim()).filter(s => STUDENT_PROFILES[s]);
     const model      = video ? VIDEO_MODEL : AUDIO_MODEL;
+    const transcriptionLanguageCode = getTranscriptionLanguageCode(language);
 
     console.log('[Dasko] New session | topic:', topic, '| persona:', persona, '| language:', language, '| video:', video, '| classroom:', classroom, studentIds);
 
@@ -743,10 +805,12 @@ async function main() {
         const entries = await Promise.all(studentIds.map(async id => {
           let transcriptBuf = '';
           const voice = STUDENT_VOICES[id] || 'Zephyr';
+          const inputAudioTranscription = { languageCode: transcriptionLanguageCode } as any;
+          const outputAudioTranscription = { languageCode: transcriptionLanguageCode } as any;
           const cfg: types.LiveConnectConfig = {
             responseModalities: [Modality.AUDIO],
-            outputAudioTranscription: {},
-            inputAudioTranscription:  {},
+            outputAudioTranscription,
+            inputAudioTranscription,
             speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
             systemInstruction: getClassroomStudentInstruction(topic, id, studentIds, fullMaterials, video, language),
           };
@@ -772,16 +836,20 @@ async function main() {
               onmessage: (msg: types.LiveServerMessage) => {
                 // Teacher input transcription (only log once, from first student's session)
                 if (msg.serverContent?.inputTranscription?.text && id === studentIds[0]) {
-                  const chunk = msg.serverContent.inputTranscription.text;
-                  teacherTranscriptBuf += ' ' + chunk;
-                  sendJson({ type: 'teacher_transcript', text: chunk });
+                  const chunk = enforceTranscriptLanguage(msg.serverContent.inputTranscription.text, language);
+                  if (chunk) {
+                    teacherTranscriptBuf += ' ' + chunk;
+                    sendJson({ type: 'teacher_transcript', text: chunk });
+                  }
                 }
 
                 // Student output transcription — only stream if this student is active
                 if (msg.serverContent?.outputTranscription?.text) {
-                  const chunk = msg.serverContent.outputTranscription.text;
-                  transcriptBuf += ' ' + chunk;
-                  if (activeSpeaker === id) sendJson({ type: 'transcript', text: chunk, name: id });
+                  const chunk = enforceTranscriptLanguage(msg.serverContent.outputTranscription.text, language);
+                  if (chunk) {
+                    transcriptBuf += ' ' + chunk;
+                    if (activeSpeaker === id) sendJson({ type: 'transcript', text: chunk, name: id });
+                  }
                 }
 
                 // Student audio
@@ -868,10 +936,12 @@ async function main() {
       }
     } else {
       // ── SOLO: create session with fullMaterials ─────────────────────────────
+      const inputAudioTranscription = { languageCode: transcriptionLanguageCode } as any;
+      const outputAudioTranscription = { languageCode: transcriptionLanguageCode } as any;
       const config: types.LiveConnectConfig = {
         responseModalities: [Modality.AUDIO],
-        outputAudioTranscription: {},
-        inputAudioTranscription:  {},
+        outputAudioTranscription,
+        inputAudioTranscription,
         speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } } },
         systemInstruction: getStudentInstruction(topic, persona, fullMaterials, video, language),
       };
@@ -894,14 +964,18 @@ async function main() {
             },
             onmessage: (message: types.LiveServerMessage) => {
               if (message.serverContent?.inputTranscription?.text) {
-                const chunk = message.serverContent.inputTranscription.text;
-                teacherTranscriptBuf += ' ' + chunk;
-                sendJson({ type: 'teacher_transcript', text: chunk });
+                const chunk = enforceTranscriptLanguage(message.serverContent.inputTranscription.text, language);
+                if (chunk) {
+                  teacherTranscriptBuf += ' ' + chunk;
+                  sendJson({ type: 'teacher_transcript', text: chunk });
+                }
               }
               if (message.serverContent?.outputTranscription?.text) {
-                const chunk = message.serverContent.outputTranscription.text;
-                studentTranscriptBuf += ' ' + chunk;
-                sendJson({ type: 'transcript', text: chunk });
+                const chunk = enforceTranscriptLanguage(message.serverContent.outputTranscription.text, language);
+                if (chunk) {
+                  studentTranscriptBuf += ' ' + chunk;
+                  sendJson({ type: 'transcript', text: chunk });
+                }
               }
               if (message.serverContent?.modelTurn?.parts) {
                 for (const part of message.serverContent.modelTurn.parts) {
