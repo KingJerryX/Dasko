@@ -56,9 +56,21 @@ const reflectionStrengths  = document.getElementById("reflectionStrengths");
 const reflectionGaps       = document.getElementById("reflectionGaps");
 const reflectionQuestions  = document.getElementById("reflectionQuestions");
 const reflectionImprovements = document.getElementById("reflectionImprovements");
-const reflectionSkills = document.getElementById("reflectionSkills");
+const reflectionVisualsGestures = document.getElementById("reflectionVisualsGestures");
+const reflectionExplanations = document.getElementById("reflectionExplanations");
+const reflectionMediaUsage  = document.getElementById("reflectionMediaUsage");
 const teachAgainBtn   = document.getElementById("teachAgainBtn");
 const changeTopicBtn  = document.getElementById("changeTopicBtn");
+const reflectionLoadingScreen = document.getElementById("reflection-loading-screen");
+const transcriptPanel  = document.getElementById("transcriptPanel");
+const coachingPanel    = document.getElementById("coachingPanel");
+const resizerLeft      = document.getElementById("resizerLeft");
+const resizerRight     = document.getElementById("resizerRight");
+const toggleTranscriptBtn = document.getElementById("toggleTranscriptBtn");
+const toggleCoachingBtn   = document.getElementById("toggleCoachingBtn");
+const uploadMaterialBtn   = document.getElementById("uploadMaterialBtn");
+const sessionFileInput    = document.getElementById("sessionFileInput");
+const sessionToast        = document.getElementById("sessionToast");
 
 // ── Student roster ───────────────────────────────────────────────────────────
 const STUDENTS = {
@@ -147,6 +159,17 @@ let timerInterval    = null;
 const fileDropZone = document.getElementById("fileDropZone");
 const fileInput    = document.getElementById("fileInput");
 let uploadedFiles  = []; // { name, mimeType, base64, size }
+
+// Panel resizing and toggles
+const TRANSCRIPT_DEFAULT_WIDTH = 300;
+const COACHING_DEFAULT_WIDTH   = 260;
+const MIN_PANEL_WIDTH = 120;
+const MAX_PANEL_WIDTH = 480;
+let transcriptPanelWidth = TRANSCRIPT_DEFAULT_WIDTH;
+let coachingPanelWidth   = COACHING_DEFAULT_WIDTH;
+let transcriptCollapsed  = false;
+let coachingCollapsed   = false;
+let resizingLeft = false, resizingRight = false;
 
 // Firebase
 let db = null;
@@ -821,6 +844,131 @@ function updateMediaLayout() {
   screenToggleBtn.classList.toggle("active", screenEnabled);
 }
 
+// ── Panel resizers and toggles ──────────────────────────────────────────────
+function applyPanelWidths() {
+  transcriptPanel.style.width = transcriptCollapsed ? "0" : `${transcriptPanelWidth}px`;
+  transcriptPanel.style.minWidth = transcriptCollapsed ? "0" : `${MIN_PANEL_WIDTH}px`;
+  transcriptPanel.classList.toggle("collapsed", transcriptCollapsed);
+  if (resizerLeft) resizerLeft.classList.toggle("hidden", transcriptCollapsed);
+  if (toggleTranscriptBtn) toggleTranscriptBtn.textContent = transcriptCollapsed ? "[>]" : "[<]";
+
+  coachingPanel.style.width = coachingCollapsed ? "0" : `${coachingPanelWidth}px`;
+  coachingPanel.style.minWidth = coachingCollapsed ? "0" : `${MIN_PANEL_WIDTH}px`;
+  coachingPanel.classList.toggle("collapsed", coachingCollapsed);
+  if (resizerRight) resizerRight.classList.toggle("hidden", coachingCollapsed);
+  if (toggleCoachingBtn) toggleCoachingBtn.textContent = coachingCollapsed ? "[<]" : "[>]";
+}
+
+function setupPanelResizers() {
+  if (!resizerLeft || !resizerRight) return;
+
+  resizerLeft.addEventListener("mousedown", (e) => { e.preventDefault(); resizingLeft = true; });
+  resizerRight.addEventListener("mousedown", (e) => { e.preventDefault(); resizingRight = true; });
+
+  document.addEventListener("mousemove", (e) => {
+    if (!resizingLeft && !resizingRight) return;
+    const x = e.clientX;
+    if (resizingLeft) {
+      const w = Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, x));
+      transcriptPanelWidth = w;
+      transcriptPanel.style.width = `${w}px`;
+      transcriptPanel.style.minWidth = `${MIN_PANEL_WIDTH}px`;
+    }
+    if (resizingRight) {
+      const w = Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, document.documentElement.clientWidth - x));
+      coachingPanelWidth = w;
+      coachingPanel.style.width = `${w}px`;
+      coachingPanel.style.minWidth = `${MIN_PANEL_WIDTH}px`;
+    }
+  });
+
+  document.addEventListener("mouseup", () => { resizingLeft = false; resizingRight = false; });
+}
+
+if (toggleTranscriptBtn) {
+  toggleTranscriptBtn.addEventListener("click", () => {
+    transcriptCollapsed = !transcriptCollapsed;
+    if (!transcriptCollapsed && transcriptPanelWidth === 0) transcriptPanelWidth = TRANSCRIPT_DEFAULT_WIDTH;
+    applyPanelWidths();
+  });
+}
+if (toggleCoachingBtn) {
+  toggleCoachingBtn.addEventListener("click", () => {
+    coachingCollapsed = !coachingCollapsed;
+    if (!coachingCollapsed && coachingPanelWidth === 0) coachingPanelWidth = COACHING_DEFAULT_WIDTH;
+    applyPanelWidths();
+  });
+}
+
+// ── In-session file drop and upload ─────────────────────────────────────────
+function showSessionToast(message) {
+  if (!sessionToast) return;
+  sessionToast.textContent = message;
+  sessionToast.classList.add("visible");
+  setTimeout(() => sessionToast.classList.remove("visible"), 2800);
+}
+
+async function sendSessionMaterialFile(file) {
+  let mimeType = file.type || "";
+  if (!mimeType) {
+    const ext = file.name.split(".").pop().toLowerCase();
+    if (ext === "md") mimeType = "text/markdown";
+    else if (ext === "txt") mimeType = "text/plain";
+    else if (ext === "csv") mimeType = "text/csv";
+    else if (ext === "pdf") mimeType = "application/pdf";
+  }
+  if (!ACCEPTED_TYPES.has(mimeType) && !file.name.match(/\.(doc|docx)$/i)) return;
+
+  const base64 = await new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(",")[1] || "");
+    reader.readAsDataURL(file);
+  });
+  if (!base64) return;
+
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify({ type: "material_file", name: file.name, mimeType: mimeType || "application/octet-stream", base64 }));
+      showSessionToast(`Shared "${file.name}" with class`);
+    } catch (_) {}
+  }
+}
+
+function setupSessionFileDrop() {
+  if (!sessionScreen) return;
+  sessionScreen.addEventListener("dragover", (e) => {
+    if (!e.dataTransfer.types.includes("files")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    sessionScreen.classList.add("drag-over-session");
+  });
+  sessionScreen.addEventListener("dragleave", (e) => {
+    if (!sessionScreen.contains(e.relatedTarget)) {
+      sessionScreen.classList.remove("drag-over-session");
+    }
+  });
+  sessionScreen.addEventListener("drop", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    sessionScreen.classList.remove("drag-over-session");
+    const files = e.dataTransfer.files;
+    if (files && files.length) {
+      for (const file of Array.from(files)) sendSessionMaterialFile(file);
+    }
+  });
+  if (uploadMaterialBtn && sessionFileInput) {
+    uploadMaterialBtn.addEventListener("click", () => sessionFileInput.click());
+    sessionFileInput.addEventListener("change", () => {
+      if (sessionFileInput.files && sessionFileInput.files.length) {
+        for (const file of Array.from(sessionFileInput.files)) sendSessionMaterialFile(file);
+        sessionFileInput.value = "";
+      }
+    });
+  }
+}
+setupSessionFileDrop();
+setupPanelResizers();
+
 // ── Frame sending (camera always, whiteboard only on changes) ────────────────
 function startFrameSending() {
   if (frameInterval) clearInterval(frameInterval);
@@ -935,8 +1083,15 @@ function stopTimer() {
 function showSession(topic) {
   setupScreen.style.display = "none";
   reflectionScreen.style.display = "none";
+  if (reflectionLoadingScreen) reflectionLoadingScreen.classList.remove("visible");
   sessionScreen.style.display = "flex";
   sessionScreen.classList.toggle("classroom-mode", classroomMode);
+
+  transcriptPanelWidth = TRANSCRIPT_DEFAULT_WIDTH;
+  coachingPanelWidth   = COACHING_DEFAULT_WIDTH;
+  transcriptCollapsed = false;
+  coachingCollapsed   = false;
+  applyPanelWidths();
 
   sessionTopicLabel.textContent = topic;
   speakerLabel.textContent = "";
@@ -965,16 +1120,18 @@ function showSetup() {
 }
 
 function showReflection(data) {
+  if (reflectionLoadingScreen) reflectionLoadingScreen.classList.remove("visible");
   sessionScreen.style.display = "none";
   reflectionScreen.style.display = "flex";
 
   reflectionSummary.textContent = data.summary || "";
 
   function fillList(el, items) {
+    if (!el) return;
     el.innerHTML = "";
     (items || []).forEach(item => {
       const li = document.createElement("li");
-      li.textContent = item;
+      li.textContent = typeof item === "string" ? item : (item && item.text ? item.text : String(item));
       el.appendChild(li);
     });
     if (!items || items.length === 0) {
@@ -989,7 +1146,17 @@ function showReflection(data) {
   fillList(reflectionGaps, data.gaps);
   fillList(reflectionQuestions, data.topQuestions);
   fillList(reflectionImprovements, data.improvements);
-  fillList(reflectionSkills, data.presentationSkills);
+
+  // Presentation & Mechanics (new schema: visualsAndGestures, explanations, mediaUsage)
+  const ps = data.presentationSkills || {};
+  if (reflectionVisualsGestures) reflectionVisualsGestures.textContent = ps.visualsAndGestures || "—";
+  if (reflectionExplanations) reflectionExplanations.textContent = ps.explanations || "—";
+  if (reflectionMediaUsage) reflectionMediaUsage.textContent = ps.mediaUsage || "—";
+
+  // Legacy: if LLM returns array, show first item in first field
+  if (Array.isArray(data.presentationSkills) && data.presentationSkills.length) {
+    if (reflectionVisualsGestures) reflectionVisualsGestures.textContent = data.presentationSkills[0];
+  }
 
   // Save to Firebase
   saveSession({ topic: sessionTopic, reflection: data, duration: sessionDuration });
@@ -1058,9 +1225,9 @@ async function connect() {
   ws.binaryType = "arraybuffer";
 
   ws.onopen = async () => {
-    setStatus("Connected", "connected");
+    setStatus("Preparing session…", "connected");
     try {
-      // Send uploaded study material files as initial context
+      // Send uploaded study material files first so the server can merge them into the system instruction before the session starts
       for (const file of uploadedFiles) {
         try {
           ws.send(JSON.stringify({
@@ -1071,20 +1238,10 @@ async function connect() {
           }));
         } catch (_) {}
       }
-
-      if (cameraEnabled) {
-        // Get audio+video together to avoid dual getUserMedia permission issues
-        await startCamera(true);
-        await startMic(cameraStream);
-      } else {
-        await startMic();
-      }
-      if (whiteboardEnabled) initWhiteboard();
-      updateMediaLayout();
-      startFrameSending();
-      startTimer();
+      // Tell server we're done sending pre-session materials; it will extract text, merge with pasted notes, then create the Live session and send session_ready
+      ws.send(JSON.stringify({ type: "ready_to_start" }));
     } catch (e) {
-      setStatus("Camera/mic failed: " + e.message, "error");
+      setStatus("Failed: " + e.message, "error");
     }
   };
 
@@ -1104,6 +1261,26 @@ async function connect() {
 
     try {
       const msg = JSON.parse(event.data);
+
+      // Session is ready: server has created the Live session with pre-session materials in context; start mic/camera/timer now
+      if (msg.type === "session_ready") {
+        (async () => {
+          try {
+            if (cameraEnabled) {
+              await startCamera(true);
+              await startMic(cameraStream);
+            } else {
+              await startMic();
+            }
+            if (whiteboardEnabled) initWhiteboard();
+            updateMediaLayout();
+            startFrameSending();
+            startTimer();
+          } catch (e) {
+            setStatus("Camera/mic failed: " + e.message, "error");
+          }
+        })();
+      }
 
       // Status
       if (msg.type === "info") setStatus(msg.message || "", "connected");
@@ -1206,8 +1383,9 @@ stopBtn.addEventListener("click", () => {
   if (ws && ws.readyState === WebSocket.OPEN) {
     try { ws.send(JSON.stringify({ type: "request_reflection" })); } catch (_) {}
     awaitingReflection = true;
-    setStatus("Generating reflection\u2026", "connected");
     stopBtn.disabled = true;
+    sessionScreen.style.display = "none";
+    if (reflectionLoadingScreen) reflectionLoadingScreen.classList.add("visible");
   } else {
     disconnect();
   }

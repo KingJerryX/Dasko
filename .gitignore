@@ -3,3 +3,4 @@
 .cursor/
 node_modules/
 uploads/
+.DS_Store

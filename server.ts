@@ -90,6 +90,9 @@ ${studentList}
 ## Prior knowledge
 ${materialsSection}
 
+## Live in-class materials
+The teacher may share files during the lesson (handouts, images, slides). When you receive a message that the teacher has shared a study material file, look at it immediately and treat it as live class material: reference it in your questions, ask for clarification about it, or connect it to what the teacher is saying. Treat dropped-in files as "in-class work" or handouts just shared with the class.
+
 ## Senses
 ${video ? GESTURE_INSTRUCTION.trim() : GESTURE_INSTRUCTION_VOICE_ONLY.trim()}
 
@@ -131,6 +134,9 @@ ${personaTrait}
 
 ## Your prior knowledge
 ${materialsSection}
+
+## Live in-class materials
+The teacher may share files during the lesson (handouts, images, slides). When you receive a message that the teacher has shared a study material file, look at it immediately and treat it as live class material for discussion: reference it in your questions or ask for clarification. Treat dropped-in files as "in-class work" or handouts just shared with you.
 
 ## How to behave like a real student
 
@@ -197,6 +203,9 @@ You must **never speak AS another student** or invent their words.
 
 ## Your prior knowledge
 ${materialsSection}
+
+## Live in-class materials
+The teacher may share files during the lesson. When you receive a message that the teacher has shared a study material file, look at it immediately and treat it as live class material: reference it in your questions or connect it to what the teacher is saying. Treat dropped-in files as "in-class work" or handouts just shared with the class.
 
 ## How to behave
 
@@ -297,7 +306,7 @@ async function generateReflection(
       gaps: [],
       topQuestions: [],
       improvements: ['Try a longer session — aim for at least 5 minutes of explanation.'],
-      presentationSkills: [],
+      presentationSkills: { visualsAndGestures: '', explanations: '', mediaUsage: '' },
     };
   }
 
@@ -318,16 +327,36 @@ async function generateReflection(
           `- "strengths": string[] — 2-3 specific things the teacher did well\n` +
           `- "gaps": string[] — 2-3 concepts that were missed, skipped, or explained unclearly (empty array if none)\n` +
           `- "topQuestions": string[] — the 3 most insightful student questions verbatim (fewer if session was short)\n` +
-          `- "improvements": string[] — 2-3 concrete, actionable suggestions for next time\n` +
-          `- "presentationSkills": string[] — 1-2 bullet points on their speaking and presentation delivery (pacing, clarity, confidence)\n\n` +
-          `Return ONLY valid JSON. No extra text.`
+          `- "improvements": string[] — 2-3 concrete, actionable suggestions for next time (at most 1 short sentence per item)\n` +
+          `- "presentationSkills": object with exactly these three keys, each a single short sentence (or empty string if not applicable):\n` +
+          `  - "visualsAndGestures": Did the teacher use the camera, hands, or whiteboard effectively to demonstrate points?\n` +
+          `  - "explanations": Were the explanations concise and clear, or rambling?\n` +
+          `  - "mediaUsage": How effectively were screen sharing or shared files/materials utilized?\n\n` +
+          `Keep every bullet and presentationSkills value to at most one short sentence. Be explicit and not text-heavy. Return ONLY valid JSON. No extra text.`
         }]
       }],
     });
 
     const raw = result.text?.trim() ?? '';
     const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '');
-    return JSON.parse(cleaned);
+    const parsed = JSON.parse(cleaned);
+    const ps = parsed.presentationSkills;
+    if (Array.isArray(ps)) {
+      parsed.presentationSkills = {
+        visualsAndGestures: ps[0] ?? '',
+        explanations: ps[1] ?? '',
+        mediaUsage: ps[2] ?? '',
+      };
+    } else if (ps && typeof ps === 'object' && !Array.isArray(ps)) {
+      parsed.presentationSkills = {
+        visualsAndGestures: typeof ps.visualsAndGestures === 'string' ? ps.visualsAndGestures : '',
+        explanations: typeof ps.explanations === 'string' ? ps.explanations : '',
+        mediaUsage: typeof ps.mediaUsage === 'string' ? ps.mediaUsage : '',
+      };
+    } else {
+      parsed.presentationSkills = { visualsAndGestures: '', explanations: '', mediaUsage: '' };
+    }
+    return parsed;
   } catch {
     return {
       summary: `You taught "${topic}". A detailed reflection could not be generated.`,
@@ -335,7 +364,7 @@ async function generateReflection(
       gaps: [],
       topQuestions: [],
       improvements: [],
-      presentationSkills: [],
+      presentationSkills: { visualsAndGestures: '', explanations: '', mediaUsage: '' },
     };
   }
 }
@@ -571,10 +600,27 @@ async function main() {
     let coachingCooldown     = 0;
     let reflectionRequested  = false;
 
+    // Deferred session start: client sends material_file(s) then ready_to_start; we merge file content into materials before creating Live session.
+    const pendingMaterialFiles: { name: string; base64: string; mimeType: string }[] = [];
+    let sessionReady = false;
+    const MAX_MATERIALS_CHARS = 80_000;
+
     function sendJson(data: object) {
       if (socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify(data));
       }
+    }
+
+    /** Process material_file: extract text server-side and send as text only (no raw PDF/media) to avoid Live API "invalid argument" crash. */
+    async function processMaterialFile(name: string, base64: string, mimeType: string): Promise<string> {
+      const buf = Buffer.from(base64, 'base64');
+      const { text, error } = await extractFromBuffer(buf, mimeType, name);
+      const maxChars = 25_000; // single realtime message size safety
+      const content = text.trim().slice(0, maxChars) + (text.trim().length > maxChars ? '\n\n[… truncated …]' : '');
+      if (content) {
+        return `[The teacher has shared a study material: "${name}".]\n\nContent:\n${content}`;
+      }
+      return `[The teacher has shared a file: "${name}".]${error ? ` (${error})` : ''}`;
     }
 
     async function onTeacherSpeechEnd() {
@@ -602,31 +648,47 @@ async function main() {
       if (emotion) sendJson({ type: 'emotion', state: emotion });
     }
 
-    // ── CLASSROOM MODE ─────────────────────────────────────────────────────
-    if (classroom && studentIds.length >= 2) {
-      let activeSpeaker: string | null = null;
-      // Small gap between speakers prevents pile-ons but is short enough that
-      // buffered audio from the winning student isn't noticeably clipped.
-      let cooldownUntil = 0;
-      const SPEAKER_GAP_MS = 500;
+    // Session refs (set when Live session(s) are created after ready_to_start)
+    let session: Awaited<ReturnType<typeof ai.live.connect>> | null = null;
+    let sessionMap: Map<string, Awaited<ReturnType<typeof ai.live.connect>>> | null = null;
+    // Classroom-only state (set when creating classroom in ready_to_start)
+    let activeSpeaker: string | null = null;
+    let cooldownUntil = 0;
+    const SPEAKER_GAP_MS = 500;
+    let studentsAllowed = true;
+    let consecutiveStudentTurns = 0;
+    const MAX_STUDENT_EXCHANGES = 2;
+    const audioBuffers = new Map<string, string[]>(studentIds.map(id => [id, []]));
+    const MAX_BUFFER_CHUNKS = 25;
+    function clearAllBuffers() {
+      audioBuffers.forEach((_, k) => audioBuffers.set(k, []));
+    }
+    let studentTranscriptBuf = '';
 
-      // Hard gate: after MAX consecutive student exchanges without teacher input
-      // all student audio is suppressed until the teacher speaks again.
-      let studentsAllowed = true;
-      let consecutiveStudentTurns = 0;
-      const MAX_STUDENT_EXCHANGES = 2;
-
-      // Per-student audio ring-buffer. Audio that arrives while cooldownUntil
-      // hasn't expired yet is buffered so the first 0-500ms of a response
-      // isn't silently dropped when the student finally claims the mic.
-      const audioBuffers = new Map<string, string[]>(studentIds.map(id => [id, []]));
-      const MAX_BUFFER_CHUNKS = 25; // ~500ms worth of audio at typical chunk rate
-
-      function clearAllBuffers() {
-        audioBuffers.forEach((_, k) => audioBuffers.set(k, []));
+    /** Build full materials string (URL materials + extracted text from pending files), then create Live session(s) and send session_ready from onopen. */
+    async function startSessionWithMaterials() {
+      let fullMaterials = materials;
+      for (const f of pendingMaterialFiles) {
+        try {
+          const buf = Buffer.from(f.base64, 'base64');
+          const { text } = await extractFromBuffer(buf, f.mimeType, f.name);
+          if (text && text.trim()) {
+            const chunk = text.trim().slice(0, MAX_MATERIALS_CHARS);
+            fullMaterials += '\n\n---\n[From file: ' + f.name + ']\n' + chunk;
+          }
+        } catch (_) {}
+      }
+      if (fullMaterials.length > MAX_MATERIALS_CHARS * 2) {
+        fullMaterials = fullMaterials.slice(0, MAX_MATERIALS_CHARS * 2) + '\n\n[… truncated …]';
       }
 
-      let sessionMap: Map<string, Awaited<ReturnType<typeof ai.live.connect>>>;
+      if (classroom && studentIds.length >= 2) {
+        // ── CLASSROOM: create sessions with fullMaterials ─────────────────────
+        activeSpeaker = null;
+        cooldownUntil = 0;
+        studentsAllowed = true;
+        consecutiveStudentTurns = 0;
+        clearAllBuffers();
 
       try {
         const entries = await Promise.all(studentIds.map(async id => {
@@ -637,14 +699,21 @@ async function main() {
             outputAudioTranscription: {},
             inputAudioTranscription:  {},
             speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
-            systemInstruction: getClassroomStudentInstruction(topic, id, studentIds, materials, video),
+            systemInstruction: getClassroomStudentInstruction(topic, id, studentIds, fullMaterials, video),
           };
 
           const sess = await ai.live.connect({
             model,
             config: cfg,
             callbacks: {
-              onopen:  () => console.log(`[Dasko] ${id} session opened`),
+              onopen:  () => {
+                console.log(`[Dasko] ${id} session opened`);
+                if (id === studentIds[0]) {
+                  sendJson({ type: 'session_ready' });
+                  sendJson({ type: 'info', message: `Your classroom is ready. Start explaining: ${topic}` });
+                  try { sess.sendRealtimeInput({ text: `The teacher has just walked in. Greet them briefly and naturally.` }); } catch (_) {}
+                }
+              },
               onmessage: (msg: types.LiveServerMessage) => {
                 // Teacher input transcription (only log once, from first student's session)
                 if (msg.serverContent?.inputTranscription?.text && id === studentIds[0]) {
@@ -735,23 +804,104 @@ async function main() {
         }));
 
         sessionMap = new Map(entries);
+        sessionReady = true;
       } catch (e: any) {
         console.error('[Dasko] Failed to create classroom sessions:', e);
         sendJson({ type: 'error', message: `Failed to connect: ${e.message}` });
         socket.close();
         return;
       }
+    } else {
+      // ── SOLO: create session with fullMaterials ─────────────────────────────
+      const config: types.LiveConnectConfig = {
+        responseModalities: [Modality.AUDIO],
+        outputAudioTranscription: {},
+        inputAudioTranscription:  {},
+        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } } },
+        systemInstruction: getStudentInstruction(topic, persona, fullMaterials, video),
+      };
+      try {
+        session = await ai.live.connect({
+          model,
+          config,
+          callbacks: {
+            onopen: () => {
+              console.log('[Dasko] Live session opened, topic:', topic);
+              sendJson({ type: 'session_ready' });
+              sendJson({ type: 'info', message: `Your student is ready. Start explaining: ${topic}` });
+              try {
+                session!.sendRealtimeInput({ text: `The teacher has joined. Greet them briefly and ask them to start explaining: ${topic}.` });
+              } catch (_) {}
+            },
+            onmessage: (message: types.LiveServerMessage) => {
+              if (message.serverContent?.inputTranscription?.text) {
+                const chunk = message.serverContent.inputTranscription.text;
+                teacherTranscriptBuf += ' ' + chunk;
+                sendJson({ type: 'teacher_transcript', text: chunk });
+              }
+              if (message.serverContent?.outputTranscription?.text) {
+                const chunk = message.serverContent.outputTranscription.text;
+                studentTranscriptBuf += ' ' + chunk;
+                sendJson({ type: 'transcript', text: chunk });
+              }
+              if (message.serverContent?.modelTurn?.parts) {
+                for (const part of message.serverContent.modelTurn.parts) {
+                  if (part.inlineData?.data) sendJson({ type: 'audio', base64: part.inlineData.data });
+                }
+              }
+              if (message.serverContent?.turnComplete) {
+                sendJson({ type: 'turn_complete' });
+                const full = studentTranscriptBuf.trim();
+                studentTranscriptBuf = '';
+                if (full) onStudentSpeech('Student', full);
+              }
+            },
+            onerror: (e: ErrorEvent) => {
+              console.error('[Dasko] Session error:', e.message ?? JSON.stringify(e));
+              sendJson({ type: 'error', message: e.message ?? 'Session error' });
+            },
+            onclose: (e: CloseEvent) => {
+              console.log('[Dasko] Live session closed:', e.code, e.reason || '');
+              if (socket.readyState === WebSocket.OPEN) socket.close();
+            },
+          },
+        });
+        sessionReady = true;
+      } catch (e: any) {
+        console.error('[Dasko] Failed to connect to Live API:', e);
+        sendJson({ type: 'error', message: `Failed to connect: ${e.message}` });
+        socket.close();
+        return;
+      }
+    }
+    }
 
-      sendJson({ type: 'info', message: `Your classroom is ready. Start explaining: ${topic}` });
-      const firstSess = sessionMap.get(studentIds[0]);
-      if (firstSess) {
-        firstSess.sendRealtimeInput({ text: `The teacher has just walked in. Greet them briefly and naturally.` });
+    socket.on('message', (data: Buffer, isBinary: boolean) => {
+      // Init phase: collect material_file(s), then on ready_to_start create session(s) with merged materials
+      if (!sessionReady) {
+        if (isBinary) return;
+        try {
+          const parsed = JSON.parse(data.toString());
+          if (parsed.type === 'material_file' && parsed.base64 && parsed.name) {
+            pendingMaterialFiles.push({
+              name: parsed.name,
+              base64: parsed.base64,
+              mimeType: parsed.mimeType || 'application/octet-stream',
+            });
+            return;
+          }
+          if (parsed.type === 'ready_to_start') {
+            startSessionWithMaterials();
+            return;
+          }
+        } catch (_) {}
+        return;
       }
 
-      socket.on('message', (data: Buffer, isBinary: boolean) => {
+      // Session ready: route to classroom or solo
+      if (sessionMap) {
         if (isBinary) {
           const b64 = data.toString('base64');
-          // Teacher is speaking — re-enable students and reset the exchange counter
           studentsAllowed = true;
           consecutiveStudentTurns = 0;
           clearAllBuffers();
@@ -762,17 +912,11 @@ async function main() {
         }
         try {
           const parsed = JSON.parse(data.toString());
-
-          if (parsed.type === 'speech_end') {
-            onTeacherSpeechEnd();
-            return;
-          }
+          if (parsed.type === 'speech_end') { onTeacherSpeechEnd(); return; }
           if (parsed.type === 'request_reflection') {
             if (reflectionRequested) return;
             reflectionRequested = true;
-            generateReflection(ai, topic, sessionLog).then(data => {
-              sendJson({ type: 'reflection', data });
-            });
+            generateReflection(ai, topic, sessionLog).then(data => { sendJson({ type: 'reflection', data }); });
             return;
           }
           if (parsed.type === 'text_input' && typeof parsed.text === 'string' && parsed.text.trim()) {
@@ -781,156 +925,77 @@ async function main() {
           if (parsed.type === 'video_frame' && typeof parsed.base64 === 'string') {
             sessionMap.forEach(sess => { try { sess.sendRealtimeInput({ media: { data: parsed.base64, mimeType: 'image/jpeg' } }); } catch (_) {} });
           }
-          if (parsed.type === 'material_file' && parsed.base64 && parsed.mimeType) {
-            console.log(`[Dasko] Received study material: ${parsed.name} (${parsed.mimeType})`);
-            sessionMap.forEach(sess => {
+          if (parsed.type === 'material_file' && parsed.base64 && parsed.name) {
+            const name = parsed.name || 'file';
+            const mimeType = parsed.mimeType || 'application/octet-stream';
+            console.log(`[Dasko] Received study material: ${name} (${mimeType}) — extracting text to avoid Live API crash`);
+            (async () => {
               try {
-                sess.sendRealtimeInput({ media: { data: parsed.base64, mimeType: parsed.mimeType } });
-                sess.sendRealtimeInput({ text: `[The teacher has shared a study material file: "${parsed.name}". Review it carefully — you may be quizzed on this content during the lesson.]` });
-              } catch (_) {}
-            });
-          }
-        } catch (_) {}
-      });
-
-      socket.on('close', () => {
-        console.log('[Dasko] Client disconnected (classroom)');
-        sessionMap.forEach(sess => { try { sess.close(); } catch (_) {} });
-      });
-      socket.on('error', e => {
-        console.error('[Dasko] WebSocket error (classroom):', e);
-        sessionMap.forEach(sess => { try { sess.close(); } catch (_) {} });
-      });
-      return;
-    }
-
-    // ── SOLO MODE ──────────────────────────────────────────────────────────
-    let studentTranscriptBuf = '';
-
-    const config: types.LiveConnectConfig = {
-      responseModalities: [Modality.AUDIO],
-      outputAudioTranscription: {},
-      inputAudioTranscription:  {},
-      speechConfig: {
-        voiceConfig: {
-          prebuiltVoiceConfig: { voiceName: 'Zephyr' },
-        },
-      },
-      systemInstruction: getStudentInstruction(topic, persona, materials, video),
-    };
-
-    let session!: Awaited<ReturnType<typeof ai.live.connect>>;
-
-    try {
-      session = await ai.live.connect({
-        model,
-        config,
-        callbacks: {
-          onopen: () => {
-            console.log('[Dasko] Live session opened, topic:', topic);
-            sendJson({ type: 'info', message: `Your student is ready. Start explaining: ${topic}` });
-          },
-          onmessage: (message: types.LiveServerMessage) => {
-            // Teacher input transcription
-            if (message.serverContent?.inputTranscription?.text) {
-              const chunk = message.serverContent.inputTranscription.text;
-              teacherTranscriptBuf += ' ' + chunk;
-              sendJson({ type: 'teacher_transcript', text: chunk });
-            }
-
-            // Student output transcription
-            if (message.serverContent?.outputTranscription?.text) {
-              const chunk = message.serverContent.outputTranscription.text;
-              studentTranscriptBuf += ' ' + chunk;
-              sendJson({ type: 'transcript', text: chunk });
-            }
-
-            // Student audio
-            if (message.serverContent?.modelTurn?.parts) {
-              for (const part of message.serverContent.modelTurn.parts) {
-                if (part.inlineData?.data) {
-                  sendJson({ type: 'audio', base64: part.inlineData.data });
-                }
+                const message = await processMaterialFile(name, parsed.base64, mimeType);
+                sessionMap!.forEach(sess => { try { sess.sendRealtimeInput({ text: message }); } catch (_) {} });
+              } catch (e) {
+                console.error('[Dasko] material_file extract failed', e);
+                sessionMap!.forEach(sess => { try { sess.sendRealtimeInput({ text: `[The teacher has shared a file: "${name}".]` }); } catch (_) {} });
               }
-            }
-
-            if (message.serverContent?.turnComplete) {
-              console.log('[Dasko] Student turn complete');
-              sendJson({ type: 'turn_complete' });
-              const full = studentTranscriptBuf.trim();
-              studentTranscriptBuf = '';
-              if (full) onStudentSpeech('Student', full);
-            }
-          },
-          onerror: (e: ErrorEvent) => {
-            console.error('[Dasko] Session error:', e.message ?? JSON.stringify(e));
-            sendJson({ type: 'error', message: e.message ?? 'Session error' });
-          },
-          onclose: (e: CloseEvent) => {
-            console.log('[Dasko] Live session closed:', e.code, e.reason || '');
-            if (socket.readyState === WebSocket.OPEN) socket.close();
-          },
-        },
-      });
-      session.sendRealtimeInput({ text: `The teacher has joined. Greet them briefly and ask them to start explaining: ${topic}.` });
-    } catch (e: any) {
-      console.error('[Dasko] Failed to connect to Live API:', e);
-      sendJson({ type: 'error', message: `Failed to connect: ${e.message}` });
-      socket.close();
-      return;
-    }
-
-    socket.on('message', (data: Buffer, isBinary: boolean) => {
-      if (!isBinary) {
-        try {
-          const msg = JSON.parse(data.toString());
-
-          if (msg.type === 'speech_end') {
-            onTeacherSpeechEnd();
-            return;
-          }
-          if (msg.type === 'request_reflection') {
-            if (reflectionRequested) return;
-            reflectionRequested = true;
-            generateReflection(ai, topic, sessionLog).then(reflData => {
-              sendJson({ type: 'reflection', data: reflData });
-            });
-            return;
-          }
-          if (msg.type === 'text_input' && typeof msg.text === 'string' && msg.text.trim()) {
-            session.sendRealtimeInput({ text: msg.text.trim() });
-          }
-          if (msg.type === 'video_frame' && typeof msg.base64 === 'string') {
-            session.sendRealtimeInput({
-              media: { data: msg.base64, mimeType: 'image/jpeg' },
-            });
-          }
-          if (msg.type === 'material_file' && msg.base64 && msg.mimeType) {
-            console.log(`[Dasko] Received study material: ${msg.name} (${msg.mimeType})`);
-            try {
-              session.sendRealtimeInput({ media: { data: msg.base64, mimeType: msg.mimeType } });
-              session.sendRealtimeInput({ text: `[The teacher has shared a study material file: "${msg.name}". Review it carefully — you may be quizzed on this content during the lesson.]` });
-            } catch (_) {}
+            })();
           }
         } catch (_) {}
         return;
       }
-      const base64 = data.toString('base64');
-      try {
-        session.sendRealtimeInput({ media: { data: base64, mimeType: 'audio/pcm;rate=16000' } });
-      } catch (e) {
-        console.error('[Dasko] sendRealtimeInput failed:', e);
+
+      if (session) {
+        if (isBinary) {
+          const base64 = data.toString('base64');
+          try { session.sendRealtimeInput({ media: { data: base64, mimeType: 'audio/pcm;rate=16000' } }); } catch (e) {
+            console.error('[Dasko] sendRealtimeInput failed:', e);
+          }
+          return;
+        }
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === 'speech_end') { onTeacherSpeechEnd(); return; }
+          if (msg.type === 'request_reflection') {
+            if (reflectionRequested) return;
+            reflectionRequested = true;
+            generateReflection(ai, topic, sessionLog).then(reflData => { sendJson({ type: 'reflection', data: reflData }); });
+            return;
+          }
+          if (msg.type === 'text_input' && typeof msg.text === 'string' && msg.text.trim()) {
+            try { session.sendRealtimeInput({ text: msg.text.trim() }); } catch (_) {}
+          }
+          if (msg.type === 'video_frame' && typeof msg.base64 === 'string') {
+            try { session.sendRealtimeInput({ media: { data: msg.base64, mimeType: 'image/jpeg' } }); } catch (_) {}
+          }
+          if (msg.type === 'material_file' && msg.base64 && msg.name) {
+            const name = msg.name || 'file';
+            const mimeType = msg.mimeType || 'application/octet-stream';
+            console.log(`[Dasko] Received study material: ${name} (${mimeType}) — extracting text to avoid Live API crash`);
+            (async () => {
+              try {
+                const message = await processMaterialFile(name, msg.base64, mimeType);
+                try { session!.sendRealtimeInput({ text: message }); } catch (e) {
+                  console.error('[Dasko] sendRealtimeInput(text) failed after material extract', e);
+                }
+              } catch (e) {
+                console.error('[Dasko] material_file extract failed', e);
+                try { session!.sendRealtimeInput({ text: `[The teacher has shared a file: "${name}".]` }); } catch (_) {}
+              }
+            })();
+          }
+        } catch (_) {}
       }
     });
 
     socket.on('close', () => {
       console.log('[Dasko] Client disconnected');
-      try { session.close(); } catch (_) {}
+      if (sessionMap) sessionMap.forEach(sess => { try { sess.close(); } catch (_) {} });
+      else if (session) try { session.close(); } catch (_) {}
     });
 
     socket.on('error', (e) => {
       console.error('[Dasko] WebSocket error:', e);
-      try { session.close(); } catch (_) {}
+      if (sessionMap) sessionMap.forEach(sess => { try { sess.close(); } catch (_) {} });
+      else if (session) try { session.close(); } catch (_) {}
     });
   });
 
