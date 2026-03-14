@@ -11,15 +11,36 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+    :root {
+      --dasko-bg: #F9FAFB;
+      --dasko-surface: rgba(255, 255, 255, 0.6);
+      --dasko-border: rgba(255, 255, 255, 0.3);
+      --dasko-border-solid: #E5E7EB;
+      --dasko-text: #1F2937;
+      --dasko-text-secondary: #6B7280;
+      --dasko-accent: #FF7355;
+      --dasko-accent-shadow: rgba(255, 115, 85, 0.35);
+      --dasko-transition: ease-in-out 0.3s;
+    }
+
     body {
       font-family: 'Inter', system-ui, sans-serif;
-      background: #fff;
-      color: #111827;
+      background: var(--dasko-bg);
+      color: var(--dasko-text);
       min-height: 100vh;
     }
 
-    .fade-out { animation: fadeOut 0.28s ease forwards; }
-    .fade-in  { animation: fadeIn  0.28s ease forwards; }
+    .glass-card {
+      background: var(--dasko-surface);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--dasko-border);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+      border-radius: 1rem;
+    }
+
+    .fade-out { animation: fadeOut 0.3s ease-in-out forwards; }
+    .fade-in  { animation: fadeIn  0.3s ease-in-out forwards; }
     @keyframes fadeOut { to   { opacity: 0; pointer-events: none; } }
     @keyframes fadeIn  { from { opacity: 0; } }
 
@@ -54,45 +75,81 @@
     .landing-cta:hover  { opacity: 0.85; }
     .landing-cta:active { transform: scale(0.98); }
 
-    /* ── SETUP ───────────────────────────────────── */
+    /* ── SETUP (Command Center) ───────────────────── */
     #setup-screen {
       display: none; width: 100%; min-height: 100vh;
-      align-items: flex-start; justify-content: center; padding: 3rem 1rem;
+      padding: 2rem 1rem; transition: opacity 0.3s ease-in-out;
     }
-    .setup-inner { width: 100%; max-width: 400px; display: flex; flex-direction: column; align-items: center; gap: 2.5rem; }
-    .logo { text-align: center; }
-    .logo h1 { font-size: 2rem; font-weight: 600; letter-spacing: -0.05em; }
-    .logo p  { font-size: 0.875rem; color: #9CA3AF; margin-top: 0.3rem; }
-    .setup-form { width: 100%; display: flex; flex-direction: column; gap: 1.25rem; }
-    .field-label { display: block; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9CA3AF; margin-bottom: 0.45rem; }
+    #setup-screen.show { display: block; }
+    .setup-container {
+      max-width: 80rem; margin: 0 auto; padding: 0 1rem;
+      display: grid; grid-template-columns: repeat(12, 1fr); gap: 1.5rem; align-items: start;
+    }
+    .setup-growth { grid-column: span 3; }
+    .setup-lab { grid-column: span 6; }
+    .setup-prep { grid-column: span 3; }
+    @media (max-width: 1024px) {
+      .setup-growth { grid-column: span 12; }
+      .setup-lab { grid-column: span 12; }
+      .setup-prep { grid-column: span 12; }
+    }
+    .setup-sidebar-card {
+      padding: 1.25rem; margin-bottom: 1rem;
+    }
+    .setup-sidebar-card h3 {
+      font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--dasko-text-secondary); margin-bottom: 0.75rem;
+    }
+    .recent-sessions-list { list-style: none; padding: 0; }
+    .recent-sessions-list li {
+      font-size: 0.8125rem; color: var(--dasko-text); padding: 0.4rem 0;
+      border-bottom: 1px solid var(--dasko-border-solid);
+    }
+    .recent-sessions-list li:last-child { border-bottom: none; }
+    .setup-empty-state {
+      text-align: center; padding: 1.5rem 0.5rem; color: var(--dasko-text-secondary);
+      font-size: 0.8125rem; line-height: 1.5;
+    }
+    .setup-empty-state .empty-icon { font-size: 2rem; margin-bottom: 0.5rem; opacity: 0.6; }
+    .setup-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .setup-stat { padding: 0.6rem; background: rgba(255,255,255,0.5); border-radius: 0.5rem; text-align: center; }
+    .setup-stat-value { font-size: 1.1rem; font-weight: 700; color: var(--dasko-accent); }
+    .setup-stat-label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--dasko-text-secondary); }
+    .setup-lab-inner { padding: 1.5rem; }
+    .setup-lab .logo { text-align: center; margin-bottom: 1.5rem; }
+    .setup-lab .logo h1 { font-size: 1.75rem; font-weight: 600; letter-spacing: -0.04em; color: var(--dasko-text); }
+    .setup-lab .logo p { font-size: 0.8125rem; color: var(--dasko-text-secondary); margin-top: 0.25rem; }
+    .setup-form { display: flex; flex-direction: column; gap: 1.25rem; }
+    .field-label { display: block; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dasko-text-secondary); margin-bottom: 0.45rem; }
     select, input[type="text"] {
-      width: 100%; padding: 0.75rem 1rem; border: 1.5px solid #E5E7EB; border-radius: 10px;
-      font-family: inherit; font-size: 0.9375rem; color: #111827; background: #fff; appearance: none; outline: none; transition: border-color 0.15s;
+      width: 100%; padding: 0.75rem 1rem; border: 1px solid var(--dasko-border-solid); border-radius: 0.75rem;
+      font-family: inherit; font-size: 0.9375rem; color: var(--dasko-text); background: rgba(255,255,255,0.8);
+      appearance: none; outline: none; transition: border-color 0.2s, box-shadow 0.2s;
     }
-    select:focus, input[type="text"]:focus { border-color: #FF7355; }
+    select:focus, input[type="text"]:focus { border-color: var(--dasko-accent); box-shadow: 0 0 0 3px var(--dasko-accent-shadow); }
     textarea {
-      width: 100%; padding: 0.75rem 1rem; border: 1.5px solid #E5E7EB; border-radius: 10px;
-      font-family: inherit; font-size: 0.9375rem; color: #111827; background: #fff; outline: none;
-      resize: vertical; min-height: 90px; line-height: 1.5; transition: border-color 0.15s;
+      width: 100%; padding: 0.75rem 1rem; border: 1px solid var(--dasko-border-solid); border-radius: 0.75rem;
+      font-family: inherit; font-size: 0.9375rem; color: var(--dasko-text); background: rgba(255,255,255,0.8);
+      resize: vertical; min-height: 90px; line-height: 1.5; outline: none; transition: border-color 0.2s, box-shadow 0.2s;
     }
-    textarea:focus { border-color: #FF7355; }
+    textarea:focus { border-color: var(--dasko-accent); box-shadow: 0 0 0 3px var(--dasko-accent-shadow); }
 
     /* File drop zone */
     .materials-section { display: flex; flex-direction: column; gap: 0.5rem; }
     .file-drop-zone {
       position: relative; width: 100%; min-height: 80px; padding: 1rem;
-      border: 2px dashed #D1D5DB; border-radius: 10px; background: #FAFAFA;
+      border: 2px dashed var(--dasko-border-solid); border-radius: 0.75rem; background: rgba(255,255,255,0.4);
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       gap: 0.4rem; cursor: pointer; transition: border-color 0.2s, background 0.2s;
     }
-    .file-drop-zone:hover { border-color: #FF7355; background: #FFF8F6; }
-    .file-drop-zone.drag-over { border-color: #FF7355; background: #FFF1ED; border-style: solid; }
+    .file-drop-zone:hover { border-color: var(--dasko-accent); background: rgba(255,115,85,0.06); }
+    .file-drop-zone.drag-over { border-color: var(--dasko-accent); background: rgba(255,115,85,0.1); border-style: solid; }
     .file-drop-zone.has-files { min-height: auto; padding: 0.65rem 0.75rem; align-items: flex-start; }
     .file-drop-icon { font-size: 1.5rem; line-height: 1; opacity: 0.5; }
     .file-drop-label {
       font-size: 0.78rem; color: #9CA3AF; text-align: center; line-height: 1.4;
     }
-    .file-drop-label span { color: #FF7355; font-weight: 500; }
+    .file-drop-label span { color: var(--dasko-accent); font-weight: 500; }
     .file-drop-input { display: none; }
     .file-list { width: 100%; display: flex; flex-direction: column; gap: 0.35rem; }
     .file-item {
@@ -112,50 +169,54 @@
       font-size: 0.7rem; color: #FF7355; cursor: pointer; margin-top: 0.15rem;
       background: none; border: none; font-family: inherit; font-weight: 500; padding: 0;
     }
+    .file-drop-add-more { color: var(--dasko-accent); }
     .file-drop-add-more:hover { text-decoration: underline; }
     .materials-divider {
       display: flex; align-items: center; gap: 0.5rem; font-size: 0.65rem;
-      color: #C4C9D4; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500;
+      color: var(--dasko-text-secondary); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500;
     }
     .materials-divider::before, .materials-divider::after {
-      content: ""; flex: 1; height: 1px; background: #E5E7EB;
+      content: ""; flex: 1; height: 1px; background: var(--dasko-border-solid);
     }
 
-    .mode-tabs { display: flex; background: #F3F4F6; border-radius: 10px; padding: 3px; gap: 3px; }
+    .mode-tabs { display: flex; background: rgba(255,255,255,0.5); border-radius: 0.75rem; padding: 3px; gap: 3px; border: 1px solid var(--dasko-border-solid); }
     .mode-tab {
-      flex: 1; padding: 0.5rem; border: none; border-radius: 8px; background: transparent;
-      font-family: inherit; font-size: 0.8125rem; font-weight: 500; color: #9CA3AF;
-      cursor: pointer; transition: background 0.15s, color 0.15s;
+      flex: 1; padding: 0.5rem; border: none; border-radius: 0.5rem; background: transparent;
+      font-family: inherit; font-size: 0.8125rem; font-weight: 500; color: var(--dasko-text-secondary);
+      cursor: pointer; transition: background 0.2s, color 0.2s;
     }
-    .mode-tab.active { background: #fff; color: #111827; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .mode-tab.active { background: #fff; color: var(--dasko-text); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
 
-    .persona-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 0.625rem; }
+    .persona-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 0.75rem; }
     .persona-card {
-      border: 1.5px solid #E5E7EB; border-radius: 12px; padding: 1rem 0.5rem 0.875rem;
-      text-align: center; cursor: pointer; user-select: none; transition: border-color 0.15s, background 0.15s;
+      border: 1px solid var(--dasko-border-solid); border-radius: 1rem; padding: 1rem 0.5rem 0.875rem;
+      text-align: center; cursor: pointer; user-select: none;
+      transition: transform 0.2s, border-color 0.2s, background 0.2s, box-shadow 0.2s;
+      background: rgba(255,255,255,0.5);
     }
-    .persona-card:hover    { border-color: #FDBA9B; background: #FFFAF8; }
-    .persona-card.selected { border-color: #FF7355; background: #FFF3EF; }
+    .persona-card:hover { transform: scale(1.02); border-color: var(--dasko-accent); background: rgba(255,115,85,0.06); box-shadow: 0 4px 12px var(--dasko-accent-shadow); }
+    .persona-card:active { transform: scale(0.98); }
+    .persona-card.selected { border-color: var(--dasko-accent); background: rgba(255,115,85,0.1); box-shadow: 0 0 0 2px var(--dasko-accent-shadow); }
     .persona-card .emoji { font-size: 1.375rem; display: block; margin-bottom: 0.35rem; }
-    .persona-card .pname { font-size: 0.75rem; font-weight: 600; color: #374151; }
-    .persona-card .pdesc { font-size: 0.65rem; color: #9CA3AF; margin-top: 0.15rem; line-height: 1.3; }
+    .persona-card .pname { font-size: 0.75rem; font-weight: 600; color: var(--dasko-text); }
+    .persona-card .pdesc { font-size: 0.65rem; color: var(--dasko-text-secondary); margin-top: 0.15rem; line-height: 1.3; }
 
-    .student-hint { font-size: 0.7rem; color: #C4C9D4; text-align: right; margin-bottom: -0.25rem; }
+    .student-hint { font-size: 0.7rem; color: var(--dasko-text-secondary); text-align: right; margin-bottom: -0.25rem; }
     .student-grid { display: flex; flex-direction: column; gap: 0.5rem; }
     .student-card {
       display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 0.875rem;
-      border: 1.5px solid #E5E7EB; border-radius: 12px; cursor: pointer; user-select: none;
-      transition: border-color 0.15s, background 0.15s;
+      border: 1px solid var(--dasko-border-solid); border-radius: 0.75rem; cursor: pointer; user-select: none;
+      background: rgba(255,255,255,0.5); transition: transform 0.2s, border-color 0.2s, background 0.2s;
     }
-    .student-card:hover    { background: #F9FAFB; }
-    .student-card.selected { background: #FAFAFA; }
+    .student-card:hover { transform: scale(1.01); background: rgba(255,255,255,0.8); }
+    .student-card.selected { border-color: var(--dasko-accent); background: rgba(255,115,85,0.08); }
     .s-dot   { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
     .s-emoji { font-size: 1.1rem; }
     .s-info  { flex: 1; min-width: 0; }
     .s-name  { font-size: 0.875rem; font-weight: 600; color: #111827; }
     .s-desc  { font-size: 0.7rem; color: #9CA3AF; margin-top: 0.1rem; }
     .s-check { font-size: 0.8rem; color: #E5E7EB; flex-shrink: 0; transition: color 0.15s; }
-    .student-card.selected .s-check { color: #9CA3AF; }
+    .student-card.selected .s-check { color: var(--dasko-text-secondary); }
 
     .toggle { position: relative; display: inline-block; cursor: pointer; }
     .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
@@ -163,7 +224,7 @@
       display: block; width: 40px; height: 22px; background: #E5E7EB;
       border-radius: 999px; transition: background 0.2s; position: relative;
     }
-    .toggle input:checked + .toggle-track { background: #111827; }
+    .toggle input:checked + .toggle-track { background: var(--dasko-accent); }
     .toggle-thumb {
       position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
       background: #fff; border-radius: 50%; transition: transform 0.2s;
@@ -172,13 +233,27 @@
     .toggle input:checked + .toggle-track .toggle-thumb { transform: translateX(18px); }
 
     #startBtn {
-      width: 100%; padding: 0.9rem; background: #111827; color: #fff; border: none;
-      border-radius: 12px; font-family: inherit; font-size: 0.9375rem; font-weight: 500;
-      cursor: pointer; letter-spacing: -0.01em; transition: opacity 0.15s, transform 0.1s;
+      width: 100%; padding: 1rem 1.5rem; background: var(--dasko-accent); color: #fff; border: none;
+      border-radius: 1rem; font-family: inherit; font-size: 1rem; font-weight: 600;
+      cursor: pointer; letter-spacing: -0.02em;
+      box-shadow: 0 4px 14px var(--dasko-accent-shadow);
+      transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s;
     }
-    #startBtn:hover   { opacity: 0.85; }
+    #startBtn:hover   { transform: translateY(-1px); box-shadow: 0 6px 20px var(--dasko-accent-shadow); }
     #startBtn:active  { transform: scale(0.98); }
-    #startBtn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+    #startBtn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+
+    .setup-prep-preview {
+      width: 100%; aspect-ratio: 1; max-height: 140px; border-radius: 1rem;
+      background: rgba(255,255,255,0.4); border: 1px solid var(--dasko-border-solid);
+      display: flex; align-items: center; justify-content: center; overflow: hidden;
+    }
+    .setup-prep-preview video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+    .setup-mic-bar-wrap { height: 8px; background: var(--dasko-border-solid); border-radius: 999px; overflow: hidden; margin-top: 0.5rem; }
+    .setup-mic-bar { height: 100%; width: 30%; background: var(--dasko-accent); border-radius: 999px; transition: width 0.2s; animation: setupMicPulse 2s ease-in-out infinite; }
+    @keyframes setupMicPulse { 0%, 100% { width: 20%; } 50% { width: 60%; } }
+    .pro-tip-card { padding: 1rem; font-size: 0.8125rem; line-height: 1.5; color: var(--dasko-text-secondary); }
+    .pro-tip-card strong { color: var(--dasko-text); display: block; margin-bottom: 0.35rem; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
 
     /* ── SESSION ──────────────────────────────────── */
     #session-screen {
@@ -448,10 +523,10 @@
       min-height: 1em; transition: color 0.4s;
     }
 
-    /* Classroom orbs */
+    /* Classroom orbs — visible in classroom mode even when no camera/whiteboard/screen */
     #classroomOrbs {
-      display: none; flex-wrap: wrap; justify-content: center;
-      gap: 1.5rem; width: 100%;
+      display: none;
+      flex-wrap: wrap; justify-content: center; gap: 1rem; padding: 0.5rem;
     }
     #session-screen.classroom-mode #classroomOrbs { display: flex; }
     #session-screen.classroom-mode .orb-area { display: none; }
@@ -534,6 +609,26 @@
     }
     .session-toast.visible { opacity: 1; }
 
+    /* Idle timeout modal */
+    #timeoutModal {
+      display: none; position: fixed; inset: 0; z-index: 2000;
+      background: rgba(0,0,0,0.5); align-items: center; justify-content: center;
+      padding: 1rem;
+    }
+    #timeoutModal.visible { display: flex; }
+    .timeout-modal-inner {
+      background: #fff; border-radius: 16px; padding: 1.5rem 2rem;
+      max-width: 360px; text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    }
+    .timeout-modal-inner h3 { font-size: 1.1rem; margin-bottom: 0.5rem; color: #111827; }
+    .timeout-modal-inner p { font-size: 0.9rem; color: #6B7280; margin-bottom: 1rem; }
+    .timeout-countdown { font-size: 1.5rem; font-weight: 700; color: #DC2626; font-variant-numeric: tabular-nums; margin-bottom: 1rem; }
+    .timeout-modal-inner button {
+      padding: 0.6rem 1.25rem; border-radius: 10px; font-family: inherit; font-size: 0.9rem; font-weight: 500;
+      cursor: pointer; border: none; background: #111827; color: #fff;
+    }
+    .timeout-modal-inner button:hover { opacity: 0.9; }
+
     .session-chat { display: flex; gap: 0.4rem; max-width: 600px; margin: 0 auto; }
     .session-chat input {
       flex: 1; padding: 0.45rem 0.75rem; background: #fff; border: 1.5px solid #E5E7EB;
@@ -546,6 +641,15 @@
       color: #374151; font-family: inherit; font-size: 0.78rem; cursor: pointer;
     }
     .session-chat button:hover { background: #E5E7EB; }
+
+    /* ── SETUP CLASSROOM LOADING ──────────────────── */
+    #setup-classroom-loading {
+      display: none; position: fixed; inset: 0; z-index: 150;
+      background: rgba(255,255,255,0.95); flex-direction: column; align-items: center; justify-content: center;
+      gap: 1.5rem;
+    }
+    #setup-classroom-loading.visible { display: flex; }
+    .setup-classroom-loading-text { font-size: 0.9375rem; color: #6B7280; text-align: center; max-width: 280px; }
 
     /* ── REFLECTION LOADING ───────────────────────── */
     #reflection-loading-screen {
@@ -572,50 +676,71 @@
       font-size: 0.9375rem; color: #6B7280; text-align: center; max-width: 280px;
     }
 
-    /* ── REFLECTION ──────────────────────────────── */
+    /* ── REFLECTION (Bento) ───────────────────────── */
     #reflection-screen {
       display: none; width: 100%; min-height: 100vh;
-      align-items: flex-start; justify-content: center; padding: 3rem 1rem;
+      padding: 2rem 1rem; transition: opacity 0.3s ease-in-out;
     }
-    .reflection-inner { width: 100%; max-width: 720px; display: flex; flex-direction: column; gap: 1.5rem; margin: 0 auto; }
-    .reflection-title { font-size: 1.5rem; font-weight: 600; text-align: center; color: #111827; }
-    .reflection-summary { text-align: center; color: #6B7280; font-size: 0.9rem; line-height: 1.6; }
-    .reflection-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    #reflection-screen.show { display: block; }
+    .reflection-inner { max-width: 56rem; margin: 0 auto; }
+    .reflection-recap { font-size: 0.875rem; color: var(--dasko-text-secondary); line-height: 1.6; }
+    .reflection-recap strong { color: var(--dasko-text); }
+    .reflection-recap-standalone { margin-bottom: 1.5rem; }
+    .reflection-title { font-size: 1.5rem; font-weight: 600; text-align: center; color: var(--dasko-text); margin-bottom: 0.5rem; }
+    .reflection-summary { text-align: center; color: var(--dasko-text-secondary); font-size: 0.9rem; line-height: 1.6; font-weight: 400; margin-bottom: 1.5rem; }
+    .reflection-bento {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
+    }
+    .reflection-bento .bento-row1 { grid-column: span 1; }
+    .reflection-bento .bento-row2 { grid-column: 1 / -1; }
+    @media (max-width: 768px) {
+      .reflection-bento { grid-template-columns: 1fr; }
+      .reflection-bento .bento-row1, .reflection-bento .bento-row2 { grid-column: span 1; }
+    }
     .reflection-card {
-      background: #F9FAFB; border: 1.5px solid #E5E7EB; border-radius: 12px; padding: 1.25rem;
+      padding: 1.25rem; border-left-width: 4px; border-left-color: var(--dasko-border-solid);
+      border-radius: 1rem; transition: var(--dasko-transition);
     }
     .reflection-card h3 {
       font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
-      letter-spacing: 0.06em; color: #9CA3AF; margin-bottom: 0.6rem;
+      letter-spacing: 0.06em; color: var(--dasko-text-secondary); margin-bottom: 0.6rem;
     }
     .reflection-card ul { list-style: none; padding: 0; }
-    .reflection-card li { font-size: 0.85rem; color: #374151; padding: 0.25rem 0; line-height: 1.5; }
-    .reflection-card li::before { content: "\2022"; color: #FF7355; margin-right: 0.5rem; }
-    /* Presentation & Mechanics card (full width, with icons and tags) */
+    .reflection-card li { font-size: 0.8125rem; font-weight: 400; color: var(--dasko-text); padding: 0.35rem 0; line-height: 1.55; }
+    .reflection-card li::before { margin-right: 0.5rem; }
+    .reflection-card.card-strength { background: rgba(16, 185, 129, 0.08); border-left-color: #059669; }
+    .reflection-card.card-strength li::before { content: "\2022"; color: #059669; }
+    .reflection-card.card-strength .reflection-highlight { font-weight: 600; color: #047857; }
+    .reflection-card.card-gap { background: rgba(220, 38, 38, 0.06); border-left-color: #DC2626; }
+    .reflection-card.card-gap li::before { content: "\2022"; color: #DC2626; }
+    .reflection-card.card-gap .reflection-highlight { font-weight: 600; color: #B91C1C; }
+    .reflection-card.card-improvement { background: rgba(255, 115, 85, 0.06); border-left-color: var(--dasko-accent); }
+    .reflection-card.card-improvement li::before { content: "\2022"; color: var(--dasko-accent); }
+    .reflection-card.card-improvement .reflection-highlight { font-weight: 600; color: var(--dasko-accent); }
+    .reflection-card.card-questions li::before { content: "\2022"; color: var(--dasko-text-secondary); }
+    .reflection-checklist { list-style: none; padding: 0; }
+    .reflection-checklist li { display: flex; align-items: flex-start; gap: 0.5rem; padding: 0.4rem 0; }
+    .reflection-checklist input[type="checkbox"] { margin-top: 0.2rem; accent-color: var(--dasko-accent); }
     .reflection-card.presentation-card { grid-column: 1 / -1; }
     .reflection-skill-row {
       display: flex; align-items: flex-start; gap: 0.75rem; margin-bottom: 0.75rem;
-      padding: 0.6rem 0.75rem; background: #fff; border-radius: 10px; border: 1px solid #E5E7EB;
+      padding: 0.6rem 0.75rem; background: rgba(255,255,255,0.5); border-radius: 0.5rem; border: 1px solid var(--dasko-border-solid);
     }
     .reflection-skill-row:last-child { margin-bottom: 0; }
     .reflection-skill-icon { font-size: 1.25rem; flex-shrink: 0; }
     .reflection-skill-content { flex: 1; min-width: 0; }
-    .reflection-skill-label { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9CA3AF; margin-bottom: 0.25rem; }
-    .reflection-skill-text { font-size: 0.85rem; color: #374151; line-height: 1.5; }
-    .reflection-tag { display: inline-block; padding: 0.2rem 0.5rem; border-radius: 6px; font-size: 0.7rem; font-weight: 500; margin-right: 0.35rem; margin-top: 0.25rem; }
-    .reflection-tag.strength { background: #D1FAE5; color: #065F46; }
-    .reflection-tag.improve { background: #FFF7ED; color: #9A3412; }
-    .reflection-progress-wrap { margin-top: 0.35rem; height: 6px; background: #E5E7EB; border-radius: 3px; overflow: hidden; }
-    .reflection-progress-bar { height: 100%; border-radius: 3px; transition: width 0.3s ease; }
-    .reflection-actions { display: flex; gap: 0.75rem; justify-content: center; margin-top: 0.5rem; }
+    .reflection-skill-label { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dasko-text-secondary); margin-bottom: 0.25rem; }
+    .reflection-skill-text { font-size: 0.85rem; color: var(--dasko-text); line-height: 1.5; }
+    .reflection-empty-msg { font-size: 0.8125rem; color: var(--dasko-text-secondary); font-style: italic; padding: 0.5rem 0; }
+    .reflection-actions { display: flex; gap: 0.75rem; justify-content: center; margin-top: 1.5rem; flex-wrap: wrap; }
     .reflection-btn {
-      padding: 0.75rem 1.5rem; border: 1.5px solid #E5E7EB; border-radius: 10px;
-      background: #fff; font-family: inherit; font-size: 0.875rem; font-weight: 500;
-      color: #374151; cursor: pointer; transition: background 0.15s;
+      padding: 0.75rem 1.5rem; border: 1px solid var(--dasko-border-solid); border-radius: 0.75rem;
+      background: rgba(255,255,255,0.6); font-family: inherit; font-size: 0.875rem; font-weight: 500;
+      color: var(--dasko-text); cursor: pointer; transition: background 0.2s, box-shadow 0.2s;
     }
-    .reflection-btn:hover { background: #F9FAFB; }
-    .reflection-btn.primary { background: #111827; color: #fff; border-color: #111827; }
-    .reflection-btn.primary:hover { opacity: 0.9; }
+    .reflection-btn:hover { background: rgba(255,255,255,0.9); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .reflection-btn.primary { background: var(--dasko-accent); color: #fff; border-color: var(--dasko-accent); box-shadow: 0 4px 12px var(--dasko-accent-shadow); }
+    .reflection-btn.primary:hover { opacity: 0.95; box-shadow: 0 6px 16px var(--dasko-accent-shadow); }
 
     /* ── Responsive ──────────────────────────────── */
     @media (max-width: 1100px) {
@@ -623,7 +748,6 @@
     }
     @media (max-width: 800px) {
       .transcript-panel { display: none !important; }
-      .reflection-grid { grid-template-columns: 1fr; }
     }
     @media (max-width: 600px) {
       .session-toolbar { flex-wrap: wrap; }
@@ -645,113 +769,156 @@
     </div>
   </div>
 
-  <!-- SETUP -->
+  <!-- SETUP (Command Center) -->
   <div id="setup-screen">
-    <div class="setup-inner">
-      <div class="logo">
-        <img src="/logo.svg" alt="Dasko" width="52" height="52" style="margin-bottom:0.5rem;" />
-        <h1>Dasko</h1>
-        <p>Learn by teaching &mdash; your AI student is listening.</p>
-      </div>
-      <div class="setup-form">
-        <div>
-          <label class="field-label" for="topic">What are you teaching?</label>
-          <select id="topic"><option value="">Loading&hellip;</option></select>
-        </div>
-        <div>
-          <label class="field-label" for="customTopic">Or type your own</label>
-          <input type="text" id="customTopic" placeholder="e.g. How vaccines work" />
-        </div>
-        <div class="materials-section">
-          <label class="field-label">Study materials <span style="font-weight:400;text-transform:none;letter-spacing:0;color:#C4C9D4">(optional)</span></label>
-          <div class="file-drop-zone" id="fileDropZone">
-            <input type="file" class="file-drop-input" id="fileInput" multiple accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv,.doc,.docx" />
-            <div class="file-drop-icon">&#x1F4CE;</div>
-            <div class="file-drop-label">Drop files here or <span>browse</span><br>PDF, images, text files</div>
-          </div>
-          <div class="materials-divider">or paste notes</div>
-          <textarea id="materials" placeholder="Paste notes or a reading you'd expect your students to have studied&hellip;"></textarea>
-        </div>
-        <div>
-          <label class="field-label">Mode</label>
-          <div class="mode-tabs">
-            <button class="mode-tab active" id="modeTabSolo"      type="button">Solo student</button>
-            <button class="mode-tab"        id="modeTabClassroom" type="button">Classroom</button>
+    <div class="setup-container">
+      <!-- Left: Growth Column -->
+      <aside class="setup-growth">
+        <div class="glass-card setup-sidebar-card">
+          <h3>Recent sessions</h3>
+          <ul class="recent-sessions-list" id="recentSessionsList"></ul>
+          <div class="setup-empty-state" id="recentSessionsEmpty">
+            <span class="empty-icon" aria-hidden="true">&#x1F4DA;</span>
+            <p>Your teaching journey starts here.</p>
           </div>
         </div>
-
-        <div id="soloSection">
-          <label class="field-label">Choose your student</label>
-          <div class="persona-grid">
-            <div class="persona-card selected" data-persona="eager">
-              <span class="emoji">&#x1F64B;</span><div class="pname">Eager</div><div class="pdesc">Lots of questions</div>
+        <div class="glass-card setup-sidebar-card">
+          <h3>Teaching stats</h3>
+          <div class="setup-stats-grid">
+            <div class="setup-stat">
+              <div class="setup-stat-value" id="statTotalHours">0h</div>
+              <div class="setup-stat-label">Total hours</div>
             </div>
-            <div class="persona-card" data-persona="skeptic">
-              <span class="emoji">&#x1F928;</span><div class="pname">Skeptic</div><div class="pdesc">Needs convincing</div>
-            </div>
-            <div class="persona-card" data-persona="confused">
-              <span class="emoji">&#x1F615;</span><div class="pname">Confused</div><div class="pdesc">Needs examples</div>
+            <div class="setup-stat">
+              <div class="setup-stat-value" id="statMastery">—</div>
+              <div class="setup-stat-label">Concept mastery</div>
             </div>
           </div>
         </div>
+      </aside>
 
-        <div id="classroomSection" style="display:none;">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.45rem;">
-            <label class="field-label" style="margin-bottom:0;">Choose your students</label>
-            <span class="student-hint" id="studentHint">Select 2&ndash;4</span>
+      <!-- Center: The Lab -->
+      <main class="setup-lab">
+        <div class="glass-card setup-lab-inner">
+          <div class="logo">
+            <img src="/logo.svg" alt="Dasko" width="48" height="48" style="margin-bottom:0.5rem;" />
+            <h1>Dasko</h1>
+            <p>Learn by teaching &mdash; your AI student is listening.</p>
           </div>
-          <div class="student-grid">
-            <div class="student-card" data-student="emma"   data-color="#93C5FD">
-              <div class="s-dot" style="background:#93C5FD"></div><span class="s-emoji">&#x1F64B;</span>
-              <div class="s-info"><div class="s-name">Emma</div><div class="s-desc">Eager, sometimes overconfident</div></div>
-              <span class="s-check">&#x2713;</span>
+          <div class="setup-form">
+            <div>
+              <label class="field-label" for="customTopic">What are you teaching?</label>
+              <input type="text" id="customTopic" placeholder="e.g. How vaccines work" />
             </div>
-            <div class="student-card" data-student="marcus" data-color="#FDA4AF">
-              <div class="s-dot" style="background:#FDA4AF"></div><span class="s-emoji">&#x1F928;</span>
-              <div class="s-info"><div class="s-name">Marcus</div><div class="s-desc">Skeptic, needs convincing</div></div>
-              <span class="s-check">&#x2713;</span>
+            <div class="materials-section">
+              <label class="field-label">Study materials <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--dasko-text-secondary)">(optional)</span></label>
+              <div class="file-drop-zone" id="fileDropZone">
+                <input type="file" class="file-drop-input" id="fileInput" multiple accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv,.doc,.docx" />
+                <div class="file-drop-icon">&#x1F4CE;</div>
+                <div class="file-drop-label">Drop files here or <span>browse</span><br>PDF, images, text files</div>
+              </div>
+              <div class="materials-divider">or paste notes</div>
+              <textarea id="materials" placeholder="Paste notes or a reading you'd expect your students to have studied&hellip;"></textarea>
             </div>
-            <div class="student-card" data-student="lily"   data-color="#C4B5FD">
-              <div class="s-dot" style="background:#C4B5FD"></div><span class="s-emoji">&#x1F615;</span>
-              <div class="s-info"><div class="s-name">Lily</div><div class="s-desc">Gets confused, needs examples</div></div>
-              <span class="s-check">&#x2713;</span>
+            <div>
+              <label class="field-label">Mode</label>
+              <div class="mode-tabs">
+                <button class="mode-tab active" id="modeTabSolo"      type="button">Solo student</button>
+                <button class="mode-tab"        id="modeTabClassroom" type="button">Classroom</button>
+              </div>
             </div>
-            <div class="student-card" data-student="priya"  data-color="#6EE7B7">
-              <div class="s-dot" style="background:#6EE7B7"></div><span class="s-emoji">&#x1F9D0;</span>
-              <div class="s-info"><div class="s-name">Priya</div><div class="s-desc">Deep thinker, makes connections</div></div>
-              <span class="s-check">&#x2713;</span>
+
+            <div id="soloSection">
+              <label class="field-label">Choose your student</label>
+              <div class="persona-grid">
+                <div class="persona-card selected" data-persona="eager">
+                  <span class="emoji">&#x1F64B;</span><div class="pname">Eager</div><div class="pdesc">Lots of questions</div>
+                </div>
+                <div class="persona-card" data-persona="skeptic">
+                  <span class="emoji">&#x1F928;</span><div class="pname">Skeptic</div><div class="pdesc">Needs convincing</div>
+                </div>
+                <div class="persona-card" data-persona="confused">
+                  <span class="emoji">&#x1F615;</span><div class="pname">Confused</div><div class="pdesc">Needs examples</div>
+                </div>
+              </div>
             </div>
-            <div class="student-card" data-student="tyler"  data-color="#D1D5DB">
-              <div class="s-dot" style="background:#D1D5DB"></div><span class="s-emoji">&#x1F634;</span>
-              <div class="s-info"><div class="s-name">Tyler</div><div class="s-desc">Barely paying attention</div></div>
-              <span class="s-check">&#x2713;</span>
+
+            <div id="classroomSection" style="display:none;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.45rem;">
+                <label class="field-label" style="margin-bottom:0;">Choose your students</label>
+                <span class="student-hint" id="studentHint">Select 2&ndash;4</span>
+              </div>
+              <div class="student-grid">
+                <div class="student-card" data-student="emma"   data-color="#93C5FD">
+                  <div class="s-dot" style="background:#93C5FD"></div><span class="s-emoji">&#x1F64B;</span>
+                  <div class="s-info"><div class="s-name">Emma</div><div class="s-desc">Eager, sometimes overconfident</div></div>
+                  <span class="s-check">&#x2713;</span>
+                </div>
+                <div class="student-card" data-student="marcus" data-color="#FDA4AF">
+                  <div class="s-dot" style="background:#FDA4AF"></div><span class="s-emoji">&#x1F928;</span>
+                  <div class="s-info"><div class="s-name">Marcus</div><div class="s-desc">Skeptic, needs convincing</div></div>
+                  <span class="s-check">&#x2713;</span>
+                </div>
+                <div class="student-card" data-student="lily"   data-color="#C4B5FD">
+                  <div class="s-dot" style="background:#C4B5FD"></div><span class="s-emoji">&#x1F615;</span>
+                  <div class="s-info"><div class="s-name">Lily</div><div class="s-desc">Gets confused, needs examples</div></div>
+                  <span class="s-check">&#x2713;</span>
+                </div>
+                <div class="student-card" data-student="priya"  data-color="#6EE7B7">
+                  <div class="s-dot" style="background:#6EE7B7"></div><span class="s-emoji">&#x1F9D0;</span>
+                  <div class="s-info"><div class="s-name">Priya</div><div class="s-desc">Deep thinker, makes connections</div></div>
+                  <span class="s-check">&#x2713;</span>
+                </div>
+                <div class="student-card" data-student="tyler"  data-color="#D1D5DB">
+                  <div class="s-dot" style="background:#D1D5DB"></div><span class="s-emoji">&#x1F634;</span>
+                  <div class="s-info"><div class="s-name">Tyler</div><div class="s-desc">Barely paying attention</div></div>
+                  <span class="s-check">&#x2713;</span>
+                </div>
+                <div class="student-card" data-student="zoe"    data-color="#FBBF24">
+                  <div class="s-dot" style="background:#FBBF24"></div><span class="s-emoji">&#x1F913;</span>
+                  <div class="s-info"><div class="s-name">Zoe</div><div class="s-desc">Overachiever, sometimes wrong</div></div>
+                  <span class="s-check">&#x2713;</span>
+                </div>
+              </div>
             </div>
-            <div class="student-card" data-student="zoe"    data-color="#FBBF24">
-              <div class="s-dot" style="background:#FBBF24"></div><span class="s-emoji">&#x1F913;</span>
-              <div class="s-info"><div class="s-name">Zoe</div><div class="s-desc">Overachiever, sometimes wrong</div></div>
-              <span class="s-check">&#x2713;</span>
+
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <label class="field-label" for="useCamera" style="margin-bottom:0;cursor:pointer;">Camera</label>
+              <label class="toggle">
+                <input type="checkbox" id="useCamera" />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </label>
             </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <label class="field-label" for="useWhiteboard" style="margin-bottom:0;cursor:pointer;">Whiteboard</label>
+              <label class="toggle">
+                <input type="checkbox" id="useWhiteboard" />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </label>
+            </div>
+
+            <button id="startBtn" type="button">Start teaching</button>
           </div>
         </div>
+      </main>
 
-        <div style="display:flex;align-items:center;justify-content:space-between;">
-          <label class="field-label" for="useCamera" style="margin-bottom:0;cursor:pointer;">Camera</label>
-          <label class="toggle">
-            <input type="checkbox" id="useCamera" />
-            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-          </label>
+      <!-- Right: Prep Column -->
+      <aside class="setup-prep">
+        <div class="glass-card setup-sidebar-card">
+          <h3>Hardware check</h3>
+          <div class="setup-prep-preview" id="setupPreviewVideo">
+            <span style="font-size:0.75rem;color:var(--dasko-text-secondary);">Camera preview</span>
+          </div>
         </div>
-
-        <div style="display:flex;align-items:center;justify-content:space-between;">
-          <label class="field-label" for="useWhiteboard" style="margin-bottom:0;cursor:pointer;">Whiteboard</label>
-          <label class="toggle">
-            <input type="checkbox" id="useWhiteboard" />
-            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-          </label>
+        <div class="glass-card setup-sidebar-card">
+          <h3>Mic level</h3>
+          <div class="setup-mic-bar-wrap"><div class="setup-mic-bar" id="setupMicBar"></div></div>
         </div>
-
-        <button id="startBtn" type="button">Start teaching</button>
-      </div>
+        <div class="glass-card setup-sidebar-card pro-tip-card">
+          <strong>Pro tip</strong>
+          <p id="setupProTip">Start with one concept and check for understanding before moving on.</p>
+        </div>
+      </aside>
     </div>
   </div>
 
@@ -864,7 +1031,6 @@
         <button class="toolbar-btn" id="wbToggleBtn" type="button"><span class="icon">&#x270F;&#xFE0F;</span> Board</button>
         <button class="toolbar-btn" id="screenToggleBtn" type="button"><span class="icon">&#x1F5A5;</span> Share</button>
         <button class="toolbar-btn" id="uploadMaterialBtn" type="button"><span class="icon">&#x1F4CE;</span> Upload Material</button>
-        <button class="toolbar-btn" id="doneSpeakingBtn" type="button"><span class="icon">&#x270B;</span> Done speaking</button>
         <div class="toolbar-spacer"></div>
         <button class="toolbar-btn danger" id="stopBtn" type="button"><span class="icon">&#x23F9;&#xFE0F;</span> End session</button>
       </div>
@@ -877,6 +1043,23 @@
     <div class="session-toast" id="sessionToast" role="status" aria-live="polite"></div>
   </div>
 
+  <!-- Idle timeout modal -->
+  <div id="timeoutModal" aria-live="polite" role="dialog" aria-labelledby="timeoutModalTitle">
+    <div class="timeout-modal-inner">
+      <h3 id="timeoutModalTitle">Are you still there?</h3>
+      <p>Session closing in <span id="timeoutCountdown">30</span> seconds.</p>
+      <button type="button" id="timeoutStayBtn">I'm here</button>
+    </div>
+  </div>
+
+  <!-- Setting up classroom (shown while initializing agents + materials) -->
+  <div id="setup-classroom-loading" aria-live="polite">
+    <div class="reflection-loading-orb-wrap">
+      <div class="reflection-loading-orb"></div>
+    </div>
+    <p class="setup-classroom-loading-text" id="setupClassroomLoadingText">Setting up classroom…</p>
+  </div>
+
   <!-- REFLECTION LOADING -->
   <div id="reflection-loading-screen" aria-live="polite">
     <div class="reflection-loading-orb-wrap">
@@ -885,29 +1068,35 @@
     <p class="reflection-loading-text">Your student is writing up their reflection…</p>
   </div>
 
-  <!-- REFLECTION -->
+  <!-- REFLECTION (Bento) -->
   <div id="reflection-screen">
     <div class="reflection-inner">
       <h2 class="reflection-title">Session Reflection</h2>
       <p class="reflection-summary" id="reflectionSummary"></p>
-      <div class="reflection-grid">
-        <div class="reflection-card">
+      <div class="reflection-recap reflection-recap-standalone" id="reflectionRecap">
+        <p><strong>Topic:</strong> <span id="reflectionRecapTopic"></span></p>
+        <p><strong>Mode:</strong> <span id="reflectionRecapMode"></span></p>
+        <p><strong>Duration:</strong> <span id="reflectionRecapDuration"></span></p>
+      </div>
+      <div class="reflection-bento">
+        <div class="reflection-card card-strength bento-row1 glass-card" id="reflectionCardStrength">
           <h3>What went well</h3>
           <ul id="reflectionStrengths"></ul>
         </div>
-        <div class="reflection-card">
-          <h3>Gaps &amp; missed concepts</h3>
+        <div class="reflection-card card-gap bento-row1 glass-card" id="reflectionCardGap">
+          <h3>Concepts to revisit</h3>
           <ul id="reflectionGaps"></ul>
+          <p class="reflection-empty-msg" id="reflectionGapsEmpty" style="display:none;">Mastery achieved! You explained every point clearly.</p>
         </div>
-        <div class="reflection-card">
+        <div class="reflection-card card-improvement bento-row2 glass-card" id="reflectionCardImprovement">
+          <h3>Next steps</h3>
+          <ul class="reflection-checklist" id="reflectionImprovementsChecklist"></ul>
+        </div>
+        <div class="reflection-card card-questions bento-row2 glass-card" id="reflectionCardQuestions">
           <h3>Student questions</h3>
           <ul id="reflectionQuestions"></ul>
         </div>
-        <div class="reflection-card">
-          <h3>Next time</h3>
-          <ul id="reflectionImprovements"></ul>
-        </div>
-        <div class="reflection-card presentation-card">
+        <div class="reflection-card presentation-card glass-card" id="reflectionCardPresentation">
           <h3>Presentation &amp; Mechanics</h3>
           <div id="reflectionPresentationSkills">
             <div class="reflection-skill-row">
@@ -932,6 +1121,7 @@
               </div>
             </div>
           </div>
+          <p class="reflection-empty-msg" id="reflectionVisualsEmpty" style="display:none;"></p>
         </div>
       </div>
       <div class="reflection-actions">
@@ -941,6 +1131,7 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <!-- Firebase SDK (loads only if configured) -->
   <script>
     if (window.__FIREBASE_CONFIG && window.__FIREBASE_CONFIG.apiKey) {

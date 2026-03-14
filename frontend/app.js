@@ -8,7 +8,6 @@ const setupScreen     = document.getElementById("setup-screen");
 const sessionScreen   = document.getElementById("session-screen");
 const reflectionScreen = document.getElementById("reflection-screen");
 const getStartedBtn   = document.getElementById("getStartedBtn");
-const topicSelect     = document.getElementById("topic");
 const customTopic     = document.getElementById("customTopic");
 const materialsEl     = document.getElementById("materials");
 const useCameraEl     = document.getElementById("useCamera");
@@ -16,7 +15,6 @@ const useWhiteboardEl = document.getElementById("useWhiteboard");
 const startBtn        = document.getElementById("startBtn");
 const stopBtn         = document.getElementById("stopBtn");
 const muteBtn         = document.getElementById("muteBtn");
-const doneSpeakingBtn = document.getElementById("doneSpeakingBtn");
 const camToggleBtn    = document.getElementById("camToggleBtn");
 const wbToggleBtn     = document.getElementById("wbToggleBtn");
 const sessionTopicLabel = document.getElementById("sessionTopicLabel");
@@ -111,6 +109,7 @@ let screenStream     = null;
 let screenEnabled    = false;
 let whiteboardEnabled = false;
 let whiteboardInited = false;
+let sessionReady     = false;
 let playbackContext  = null;
 let playbackGainNode = null;
 let nextPlayTime     = 0;
@@ -154,6 +153,13 @@ let sessionMaterials = "";
 let sessionStartTime = 0;
 let sessionDuration  = 0;
 let timerInterval    = null;
+
+// Idle timeout: 2 min no speech → modal, then 30s countdown → end session
+const IDLE_WARN_MS   = 2 * 60 * 1000;
+const IDLE_COUNTDOWN_SEC = 30;
+let idleTimer        = null;
+let idleCountdownInterval = null;
+let idleCountdownSec = IDLE_COUNTDOWN_SEC;
 
 // File uploads
 const fileDropZone = document.getElementById("fileDropZone");
@@ -248,6 +254,87 @@ function playButtonSound(type) {
   document.addEventListener(ev, () => { if (!_startupPlayed) playStartupTone(); }, { once: true, capture: true });
 });
 
+// ── Setup hardware (camera preview + mic level) ───────────────────────────────
+let setupPreviewStream = null;
+let setupMicContext = null;
+let setupMicAnimationId = null;
+let proTipInterval = null;
+
+function stopSetupHardware() {
+  if (setupMicAnimationId) {
+    cancelAnimationFrame(setupMicAnimationId);
+    setupMicAnimationId = null;
+  }
+  if (setupMicContext) {
+    setupMicContext.close().catch(() => {});
+    setupMicContext = null;
+  }
+  if (setupPreviewStream) {
+    setupPreviewStream.getTracks().forEach(t => t.stop());
+    setupPreviewStream = null;
+  }
+  const previewEl = document.getElementById("setupPreviewVideo");
+  if (previewEl) {
+    previewEl.innerHTML = '<span style="font-size:0.75rem;color:var(--dasko-text-secondary);">Camera preview</span>';
+  }
+  const barEl = document.getElementById("setupMicBar");
+  if (barEl) {
+    barEl.style.width = "";
+    barEl.style.animation = "";
+  }
+  if (proTipInterval) {
+    clearInterval(proTipInterval);
+    proTipInterval = null;
+  }
+}
+
+async function startSetupHardware() {
+  stopSetupHardware();
+  const previewEl = document.getElementById("setupPreviewVideo");
+  const barEl = document.getElementById("setupMicBar");
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    setupPreviewStream = stream;
+    if (previewEl) {
+      previewEl.innerHTML = "";
+      const video = document.createElement("video");
+      video.autoplay = true;
+      video.muted = true;
+      video.playsInline = true;
+      video.srcObject = stream;
+      video.style.width = "100%";
+      video.style.height = "100%";
+      video.style.objectFit = "cover";
+      video.style.transform = "scaleX(-1)";
+      previewEl.appendChild(video);
+    }
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    setupMicContext = ctx;
+    const src = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.8;
+    src.connect(analyser);
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    function tick() {
+      setupMicAnimationId = requestAnimationFrame(tick);
+      analyser.getByteFrequencyData(dataArray);
+      let sum = 0;
+      for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+      const avg = sum / dataArray.length;
+      const pct = Math.min(100, (avg / 128) * 100);
+      if (barEl) {
+        barEl.style.width = pct + "%";
+        barEl.style.animation = "none";
+      }
+    }
+    tick();
+  } catch (e) {
+    console.warn("[Dasko] Setup hardware:", e);
+    if (previewEl) previewEl.innerHTML = '<span style="font-size:0.75rem;color:var(--dasko-text-secondary);">Camera unavailable</span>';
+  }
+}
+
 // ── Landing → Setup ──────────────────────────────────────────────────────────
 getStartedBtn.addEventListener("click", () => {
   playButtonSound("confirm");
@@ -255,9 +342,13 @@ getStartedBtn.addEventListener("click", () => {
   setTimeout(() => {
     landingScreen.style.display = "none";
     landingScreen.classList.remove("fade-out");
-    setupScreen.style.display = "flex";
+    setupScreen.style.display = "block";
     setupScreen.classList.add("fade-in");
     setTimeout(() => setupScreen.classList.remove("fade-in"), 300);
+    startSetupHardware();
+    setProTip();
+    proTipInterval = setInterval(setProTip, 10000);
+    updateStartButton();
   }, 280);
 });
 
@@ -306,7 +397,18 @@ document.querySelectorAll(".student-card").forEach(card => {
   });
 });
 
+if (customTopic) {
+  customTopic.addEventListener("input", updateStartButton);
+  customTopic.addEventListener("change", updateStartButton);
+}
+
 function updateStartButton() {
+  const hasTopic = customTopic && customTopic.value.trim().length > 0;
+  if (!hasTopic) {
+    startBtn.disabled = true;
+    startBtn.textContent = "Enter a topic";
+    return;
+  }
   if (!classroomMode) { startBtn.disabled = false; startBtn.textContent = "Start teaching"; return; }
   const n = selectedStudents.size;
   startBtn.disabled = n < 2;
@@ -315,19 +417,10 @@ function updateStartButton() {
   else              { startBtn.textContent = `Start teaching (${n} students)`;   studentHint.textContent = `${n} selected`; }
 }
 
-// ── Topic loading ────────────────────────────────────────────────────────────
 function escapeHtml(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
 
-async function loadTopics() {
-  try {
-    const res = await fetch(`${location.origin}/api/topics`);
-    const data = await res.json();
-    topicSelect.innerHTML = data.topics.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
-  } catch { topicSelect.innerHTML = '<option value="">Could not load topics</option>'; }
-}
-
 function getSelectedTopic() {
-  return customTopic.value.trim() || topicSelect.value || "the topic";
+  return customTopic.value.trim() || "the topic";
 }
 
 // ── File upload handling ──────────────────────────────────────────────────────
@@ -574,6 +667,10 @@ function pcm16ToFloat32(pcm16) {
 // ── Audio playback ───────────────────────────────────────────────────────────
 async function playPcm24k(arrayBuffer) {
   if (!arrayBuffer || arrayBuffer.byteLength === 0) return;
+  // #region agent log
+  fetch('http://127.0.0.1:7432/ingest/c84c3cea-d2ed-45e0-bc4d-419db123a810',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc1cf4'},body:JSON.stringify({sessionId:'fc1cf4',location:'app.js:playPcm24k',message:'playPcm24k entry',data:{awaitingReflection,byteLength:arrayBuffer.byteLength},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
+  if (awaitingReflection) return;
+  // #endregion
   try {
     audioChunksReceived++;
     if (audioChunksReceived === 1) setOrbState("speaking");
@@ -601,6 +698,9 @@ async function playPcm24k(arrayBuffer) {
 }
 
 function stopPlayback() {
+  // #region agent log
+  fetch('http://127.0.0.1:7432/ingest/c84c3cea-d2ed-45e0-bc4d-419db123a810',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc1cf4'},body:JSON.stringify({sessionId:'fc1cf4',location:'app.js:stopPlayback',message:'stopPlayback called',data:{},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
+  // #endregion
   playbackGainNode = null;
   if (playbackContext) { try { playbackContext.close(); } catch (_) {} playbackContext = null; }
   nextPlayTime = 0;
@@ -627,20 +727,21 @@ function addTranscriptEntry(speaker, type) {
   return { id, el: div, textEl: txt, rawText: "" };
 }
 
-function appendToEntry(entry, chunk) {
+function appendToEntry(entry, chunk, options) {
   if (!entry) return;
+  const live = options && options.live !== false;
   const t = entry.rawText;
   if (t && !t.endsWith(" ") && !chunk.startsWith(" ") && !/^[.,!?;:]/.test(chunk)) {
     entry.rawText += " ";
   }
   entry.rawText += chunk;
-  entry.textEl.textContent = entry.rawText;
+  entry.textEl.textContent = live ? entry.rawText : "\u2026";
   transcriptBody.scrollTop = transcriptBody.scrollHeight;
 }
 
-async function cleanupEntry(entry) {
+async function cleanupEntry(entry, showCleaningState = true) {
   if (!entry || !entry.rawText.trim()) return;
-  entry.textEl.classList.add("cleaning");
+  if (showCleaningState) entry.textEl.classList.add("cleaning");
   try {
     const res = await fetch("/api/cleanup-transcript", {
       method: "POST",
@@ -652,12 +753,14 @@ async function cleanupEntry(entry) {
       }),
     });
     const { cleaned } = await res.json();
-    if (cleaned && cleaned.trim()) {
-      entry.rawText = cleaned;
-      entry.textEl.textContent = cleaned;
-    }
-  } catch (_) {}
-  entry.textEl.classList.remove("cleaning");
+    const text = (cleaned && cleaned.trim()) ? cleaned : entry.rawText;
+    entry.rawText = text;
+    entry.textEl.textContent = text;
+  } catch (_) {
+    entry.textEl.textContent = entry.rawText;
+  } finally {
+    entry.textEl.classList.remove("cleaning");
+  }
 }
 
 // ── Coaching tips ────────────────────────────────────────────────────────────
@@ -818,18 +921,18 @@ function updateMediaLayout() {
   const dualMedia   = activeSources === 2;
   const tripleMedia = activeSources === 3;
 
-  // Whiteboard in media container (top of center)
-  mediaContainer.classList.toggle("hidden", !whiteboardEnabled);
+  // Whiteboard in media container (only show after session is ready)
+  mediaContainer.classList.toggle("hidden", !sessionReady || !whiteboardEnabled);
   whiteboardCanvas.style.display = whiteboardEnabled ? "block" : "none";
   cameraFeed.style.display = "none"; // Hidden — only used internally
   wbToolbar.classList.toggle("visible", whiteboardEnabled);
   orbPill.classList.toggle("visible", whiteboardEnabled);
 
-  // Screen share container
-  screenContainer.classList.toggle("visible", screenEnabled);
+  // Screen share container (only show after session is ready to avoid empty box during loading)
+  screenContainer.classList.toggle("visible", sessionReady && screenEnabled);
 
-  // Camera self-view in center column
-  cameraContainer.classList.toggle("visible", cameraEnabled);
+  // Camera self-view in center column (only show after session is ready)
+  cameraContainer.classList.toggle("visible", sessionReady && cameraEnabled);
 
   // Layout modes: dual-media when 2 sources, triple-media when all 3
   sessionCenter.classList.toggle("dual-media", dualMedia);
@@ -969,36 +1072,47 @@ function setupSessionFileDrop() {
 setupSessionFileDrop();
 setupPanelResizers();
 
-// ── Frame sending (camera always, whiteboard only on changes) ────────────────
+// ── Frame sending: composite camera/screen + whiteboard so AI sees board ────
 function startFrameSending() {
   if (frameInterval) clearInterval(frameInterval);
+  let frameCount = 0;
   frameInterval = setInterval(() => {
+    if (awaitingReflection) return;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     if (!cameraEnabled && !whiteboardEnabled && !screenEnabled) return;
 
     const ctx = compositeCanvas.getContext("2d");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, 640, 360);
 
-    // Always send camera frame when camera is on
-    if (cameraEnabled && cameraPipFeed.readyState >= 2) {
-      ctx.drawImage(cameraPipFeed, 0, 0, 640, 360);
-      const base64 = compositeCanvas.toDataURL("image/jpeg", 0.7).split(",")[1];
-      try { ws.send(JSON.stringify({ type: "video_frame", base64 })); } catch (_) {}
+    let drewScreen = false;
+    let drewCamera = false;
+    if (screenEnabled && screenFeed && screenFeed.srcObject) {
+      try { ctx.drawImage(screenFeed, 0, 0, 640, 360); drewScreen = true; } catch (_) {}
     }
-
-    // Only send whiteboard frame when something changed
-    if (whiteboardEnabled && canvasDirty) {
+    if (cameraEnabled && cameraPipFeed && cameraPipFeed.srcObject) {
+      try {
+        if (drewScreen) {
+          ctx.drawImage(cameraPipFeed, 640 - 180, 360 - 120, 160, 120);
+        } else {
+          ctx.drawImage(cameraPipFeed, 0, 0, 640, 360);
+        }
+        drewCamera = true;
+      } catch (_) {}
+    }
+    if (whiteboardEnabled && whiteboardCanvas.width) {
       ctx.drawImage(whiteboardCanvas, 0, 0, 640, 360);
-      const base64 = compositeCanvas.toDataURL("image/jpeg", 0.7).split(",")[1];
-      try { ws.send(JSON.stringify({ type: "video_frame", base64 })); } catch (_) {}
-      canvasDirty = false;
     }
 
-    // Always send screen share frame when active
-    if (screenEnabled && screenFeed.readyState >= 2) {
-      ctx.drawImage(screenFeed, 0, 0, 640, 360);
-      const base64 = compositeCanvas.toDataURL("image/jpeg", 0.7).split(",")[1];
-      try { ws.send(JSON.stringify({ type: "video_frame", base64 })); } catch (_) {}
+    const base64 = compositeCanvas.toDataURL("image/jpeg", 0.7).split(",")[1];
+    try { ws.send(JSON.stringify({ type: "video_frame", base64 })); } catch (_) {}
+    canvasDirty = false;
+    frameCount++;
+    // #region agent log
+    if (frameCount % 5 === 1) {
+      fetch('http://127.0.0.1:7432/ingest/c84c3cea-d2ed-45e0-bc4d-419db123a810',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc1cf4'},body:JSON.stringify({sessionId:'fc1cf4',location:'app.js:startFrameSending',message:'video_frame sent',data:{cameraEnabled,screenEnabled,cameraPipFeedReady:cameraPipFeed?cameraPipFeed.readyState:null,screenFeedReady:screenFeed?screenFeed.readyState:null,drewCamera,drewScreen,frameCount},timestamp:Date.now(),hypothesisId:'H2,H3'})}).catch(()=>{});
     }
+    // #endregion
   }, 1000);
 }
 
@@ -1010,8 +1124,14 @@ async function startMic(existingStream = null) {
   micContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SEND_SAMPLE_RATE });
   const source = micContext.createMediaStreamSource(audioOnlyStream);
 
+  // Pre-gain so quieter / far-away speech is audible to the AI (e.g. when teacher is far from device)
+  const preGain = micContext.createGain();
+  preGain.gain.value = 2.2;
+  source.connect(preGain);
+
   micProcessor = micContext.createScriptProcessor(BUFFER_SIZE, 1, 1);
   micProcessor.onaudioprocess = e => {
+    if (awaitingReflection) return;
     if (micMuted || !ws || ws.readyState !== WebSocket.OPEN) return;
     // Echo suppression: don't send audio while student is speaking
     // (mic picks up student playback from speakers, which would interrupt the student)
@@ -1022,11 +1142,13 @@ async function startMic(existingStream = null) {
     const rms = Math.sqrt(sum / input.length);
 
     if (rms > SPEECH_ENERGY_THRESHOLD) {
+      resetIdleTimer();
       if (!vadInSpeech) {
         vadInSpeech = true;
         teacherSpeechEnded = false;
         setMicActive(true);
         if (currentOrbState !== "speaking") setOrbState("listening");
+        stopPlayback(); // Stop student audio so teacher can interrupt naturally
         try { ws.send(JSON.stringify({ type: "speech_start" })); } catch (_) {}
       }
       vadSilenceCount = 0;
@@ -1038,24 +1160,34 @@ async function startMic(existingStream = null) {
         teacherSpeechEnded = true;
         setMicActive(false);
         if (currentOrbState !== "speaking") setOrbState("thinking");
-        try { ws.send(JSON.stringify({ type: "speech_end" })); } catch (_) {}
+        try { ws.send(JSON.stringify({ type: "speech_end", media: { camera: cameraEnabled, whiteboard: whiteboardEnabled, screen: screenEnabled } })); } catch (_) {}
 
-        // Cleanup teacher transcript
-        if (currentTeacherEntry && currentTeacherEntry.rawText.trim()) {
-          cleanupEntry(currentTeacherEntry);
-        }
+        const entryToClean = currentTeacherEntry;
         currentTeacherEntry = null;
+        if (entryToClean && entryToClean.rawText.trim()) {
+          cleanupEntry(entryToClean, true).catch(() => {});
+        }
       }
     }
     try { ws.send(float32ToPcm16(input)); } catch (_) {}
   };
 
-  source.connect(micProcessor);
+  preGain.connect(micProcessor);
   const gain = micContext.createGain();
   gain.gain.value = 0;
   micProcessor.connect(gain);
   gain.connect(micContext.destination);
   if (micContext.state === "suspended") await micContext.resume();
+
+  // Reflect actual mic state: we have a stream and are not muted → show "mic on"
+  setMicActive(!micMuted);
+  const audioTracks = (micStream || existingStream)?.getAudioTracks?.();
+  if (audioTracks?.length) {
+    const track = audioTracks[0];
+    const updateMicUI = () => setMicActive(!micMuted && track.enabled);
+    track.addEventListener("enabled", updateMicUI);
+    track.addEventListener("mute", () => setMicActive(false));
+  }
 }
 
 // ── Session timer ────────────────────────────────────────────────────────────
@@ -1077,6 +1209,51 @@ function startTimer() {
 
 function stopTimer() {
   if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+}
+
+// ── Idle timeout ──────────────────────────────────────────────────────────────
+function resetIdleTimer() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    idleTimer = null;
+    showTimeoutModal();
+  }, IDLE_WARN_MS);
+}
+
+function showTimeoutModal() {
+  const modal = document.getElementById("timeoutModal");
+  const countEl = document.getElementById("timeoutCountdown");
+  if (!modal || !countEl) return;
+  idleCountdownSec = IDLE_COUNTDOWN_SEC;
+  countEl.textContent = String(idleCountdownSec);
+  modal.classList.add("visible");
+  if (idleCountdownInterval) clearInterval(idleCountdownInterval);
+  idleCountdownInterval = setInterval(() => {
+    idleCountdownSec--;
+    if (countEl) countEl.textContent = String(idleCountdownSec);
+    if (idleCountdownSec <= 0) {
+      clearInterval(idleCountdownInterval);
+      idleCountdownInterval = null;
+      hideTimeoutModal();
+      if (stopBtn && ws && ws.readyState === WebSocket.OPEN) {
+        awaitingReflection = true;
+        stopPlayback();
+        try { ws.send(JSON.stringify({ type: "request_reflection" })); } catch (_) {}
+        stopBtn.disabled = true;
+        sessionScreen.style.display = "none";
+        const loading = document.getElementById("reflection-loading-screen");
+        if (loading) loading.classList.add("visible");
+      }
+    }
+  }, 1000);
+}
+
+function hideTimeoutModal() {
+  const modal = document.getElementById("timeoutModal");
+  if (modal) modal.classList.remove("visible");
+  if (idleCountdownInterval) { clearInterval(idleCountdownInterval); idleCountdownInterval = null; }
+  resetIdleTimer();
 }
 
 // ── Session lifecycle ────────────────────────────────────────────────────────
@@ -1106,15 +1283,96 @@ function showSession(topic) {
   currentTeacherEntry = null;
   currentStudentEntry = null;
 
+  sessionReady = false;
   if (classroomMode) createClassroomOrbs();
   updateMediaLayout();
+  // #region agent log
+  const camVis = cameraContainer && cameraContainer.classList.contains("visible");
+  fetch('http://127.0.0.1:7432/ingest/c84c3cea-d2ed-45e0-bc4d-419db123a810',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc1cf4'},body:JSON.stringify({sessionId:'fc1cf4',location:'app.js:showSession',message:'showSession done',data:{cameraEnabled,camContainerVisible:!!camVis},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+  // #endregion
+}
+
+const PRO_TIPS = [
+  "Start with one concept and check for understanding before moving on.",
+  "Use the whiteboard to draw a quick diagram—it helps visual learners.",
+  "Pause after each key point and ask: \"Does that make sense so far?\"",
+  "If your student seems stuck, try rephrasing with a real-world example.",
+  "Let silence sit for a moment; it gives them time to formulate questions.",
+];
+
+function loadRecentSessions() {
+  const list = document.getElementById("recentSessionsList");
+  const empty = document.getElementById("recentSessionsEmpty");
+  if (!list || !empty) return;
+  try {
+    const raw = localStorage.getItem("dasko_recent_topics");
+    const topics = raw ? JSON.parse(raw) : [];
+    list.innerHTML = "";
+    if (topics.length === 0) {
+      empty.style.display = "block";
+      return;
+    }
+    empty.style.display = "none";
+    topics.slice(0, 3).forEach(t => {
+      const li = document.createElement("li");
+      li.textContent = t;
+      list.appendChild(li);
+    });
+  } catch (_) {
+    empty.style.display = "block";
+  }
+}
+
+function pushRecentTopic(topic) {
+  if (!topic || typeof topic !== "string") return;
+  try {
+    const raw = localStorage.getItem("dasko_recent_topics");
+    const topics = raw ? JSON.parse(raw) : [];
+    const next = [topic.trim(), ...topics.filter(t => t !== topic.trim())].slice(0, 3);
+    localStorage.setItem("dasko_recent_topics", JSON.stringify(next));
+  } catch (_) {}
+}
+
+function updateSetupStats() {
+  const hoursEl = document.getElementById("statTotalHours");
+  const masteryEl = document.getElementById("statMastery");
+  if (hoursEl) {
+    try {
+      let totalSec = parseInt(localStorage.getItem("dasko_total_seconds"), 10) || 0;
+      if (totalSec === 0) {
+        const oldVal = parseInt(localStorage.getItem("dasko_total_minutes"), 10);
+        if (oldVal > 0) {
+          totalSec = oldVal;
+          localStorage.setItem("dasko_total_seconds", String(totalSec));
+          localStorage.removeItem("dasko_total_minutes");
+        }
+      }
+      const h = Math.floor(totalSec / 3600);
+      const m = Math.floor((totalSec % 3600) / 60);
+      hoursEl.textContent = h > 0 ? h + "h" : (m > 0 ? m + "m" : "0h");
+    } catch (_) {
+      hoursEl.textContent = "0h";
+    }
+  }
+  if (masteryEl) masteryEl.textContent = "—";
+}
+
+function setProTip() {
+  const el = document.getElementById("setupProTip");
+  if (el && PRO_TIPS.length) el.textContent = PRO_TIPS[Math.floor(Math.random() * PRO_TIPS.length)];
 }
 
 function showSetup() {
   sessionScreen.style.display = "none";
   reflectionScreen.style.display = "none";
   sessionScreen.classList.remove("classroom-mode");
-  setupScreen.style.display = "flex";
+  setupScreen.style.display = "block";
+  loadRecentSessions();
+  updateSetupStats();
+  setProTip();
+  proTipInterval = setInterval(setProTip, 10000);
+  startSetupHardware();
+  updateStartButton();
   setOrbState("idle");
   stopBtn.disabled = false;
 }
@@ -1122,43 +1380,114 @@ function showSetup() {
 function showReflection(data) {
   if (reflectionLoadingScreen) reflectionLoadingScreen.classList.remove("visible");
   sessionScreen.style.display = "none";
-  reflectionScreen.style.display = "flex";
+  reflectionScreen.style.display = "block";
 
   reflectionSummary.textContent = data.summary || "";
 
-  function fillList(el, items) {
+  const recapTopic = document.getElementById("reflectionRecapTopic");
+  const recapMode = document.getElementById("reflectionRecapMode");
+  const recapDuration = document.getElementById("reflectionRecapDuration");
+  if (recapTopic) recapTopic.textContent = sessionTopic || "—";
+  if (recapMode) recapMode.textContent = classroomMode ? "Classroom" : "Solo";
+  if (recapDuration) recapDuration.textContent = formatTime(sessionDuration) || "0:00";
+
+  function wrapBold(s, positive) {
+    const cls = positive ? "reflection-highlight" : "reflection-highlight";
+    return s.replace(/\*\*(.*?)\*\*/g, (_, t) => `<span class="${cls}">${escapeHtml(t)}</span>`);
+  }
+  function fillList(el, items, positive) {
     if (!el) return;
     el.innerHTML = "";
     (items || []).forEach(item => {
       const li = document.createElement("li");
-      li.textContent = typeof item === "string" ? item : (item && item.text ? item.text : String(item));
+      const raw = typeof item === "string" ? item : (item && item.text ? item.text : String(item));
+      li.innerHTML = wrapBold(raw, positive);
       el.appendChild(li);
     });
     if (!items || items.length === 0) {
       const li = document.createElement("li");
       li.textContent = "No data";
-      li.style.color = "#9CA3AF";
+      li.style.color = "var(--dasko-text-secondary)";
       el.appendChild(li);
     }
   }
 
-  fillList(reflectionStrengths, data.strengths);
-  fillList(reflectionGaps, data.gaps);
-  fillList(reflectionQuestions, data.topQuestions);
-  fillList(reflectionImprovements, data.improvements);
+  fillList(reflectionStrengths, data.strengths, true);
+  const gapsList = document.getElementById("reflectionGaps");
+  const gapsEmpty = document.getElementById("reflectionGapsEmpty");
+  if (gapsList && gapsEmpty) {
+    if (!data.gaps || data.gaps.length === 0) {
+      gapsList.innerHTML = "";
+      gapsEmpty.style.display = "block";
+    } else {
+      gapsEmpty.style.display = "none";
+      fillList(gapsList, data.gaps, false);
+    }
+  }
+  fillList(reflectionQuestions, data.topQuestions, true);
 
-  // Presentation & Mechanics (new schema: visualsAndGestures, explanations, mediaUsage)
+  const checklistEl = document.getElementById("reflectionImprovementsChecklist");
+  if (checklistEl) {
+    checklistEl.innerHTML = "";
+    (data.improvements || []).forEach(text => {
+      const raw = typeof text === "string" ? text : (text && text.text ? text.text : String(text));
+      const li = document.createElement("li");
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.id = "reflection-cb-" + Math.random().toString(36).slice(2, 8);
+      const label = document.createElement("label");
+      label.htmlFor = cb.id;
+      label.innerHTML = wrapBold(raw, true);
+      li.appendChild(cb);
+      li.appendChild(label);
+      checklistEl.appendChild(li);
+    });
+    if (!data.improvements || data.improvements.length === 0) {
+      const li = document.createElement("li");
+      li.textContent = "No steps suggested.";
+      li.style.color = "var(--dasko-text-secondary)";
+      checklistEl.appendChild(li);
+    }
+  }
+
+  const visualsEmpty = document.getElementById("reflectionVisualsEmpty");
+  if (visualsEmpty) {
+    const ps = data.presentationSkills || {};
+    const noVisuals = !ps.visualsAndGestures || ps.visualsAndGestures === "—" || !ps.visualsAndGestures.trim();
+    if (noVisuals) {
+      visualsEmpty.textContent = "Tip: Next time, try using the whiteboard to illustrate " + (sessionTopic || "your topic") + ".";
+      visualsEmpty.style.display = "block";
+    } else {
+      visualsEmpty.style.display = "none";
+    }
+  }
+
+  const cardIds = ["reflectionCardStrength", "reflectionCardGap", "reflectionCardQuestions", "reflectionCardImprovement", "reflectionCardPresentation"];
+  const studentIds = classroomMode ? Array.from(selectedStudents) : [];
+  cardIds.forEach((id, i) => {
+    const card = document.getElementById(id);
+    if (!card) return;
+    if (studentIds[i] && STUDENTS[studentIds[i]]) {
+      card.style.borderLeftColor = STUDENTS[studentIds[i]].color;
+    } else if (!classroomMode && !card.classList.contains("card-gap") && !card.classList.contains("card-strength") && !card.classList.contains("card-improvement")) {
+      card.style.borderLeftColor = "var(--dasko-border-solid)";
+    }
+  });
+
   const ps = data.presentationSkills || {};
   if (reflectionVisualsGestures) reflectionVisualsGestures.textContent = ps.visualsAndGestures || "—";
   if (reflectionExplanations) reflectionExplanations.textContent = ps.explanations || "—";
   if (reflectionMediaUsage) reflectionMediaUsage.textContent = ps.mediaUsage || "—";
-
-  // Legacy: if LLM returns array, show first item in first field
   if (Array.isArray(data.presentationSkills) && data.presentationSkills.length) {
     if (reflectionVisualsGestures) reflectionVisualsGestures.textContent = data.presentationSkills[0];
   }
 
-  // Save to Firebase
+  pushRecentTopic(sessionTopic);
+  try {
+    const raw = localStorage.getItem("dasko_total_seconds");
+    const totalSec = (raw ? parseInt(raw, 10) : 0) + sessionDuration;
+    localStorage.setItem("dasko_total_seconds", String(totalSec));
+  } catch (_) {}
   saveSession({ topic: sessionTopic, reflection: data, duration: sessionDuration });
 }
 
@@ -1177,6 +1506,11 @@ function disconnect(keepScreen = false) {
   if (frameInterval) { clearInterval(frameInterval); frameInterval = null; }
   stopTimer();
   stopPlayback();
+  if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+  if (idleCountdownInterval) { clearInterval(idleCountdownInterval); idleCountdownInterval = null; }
+  hideTimeoutModal();
+  const setupLoading = document.getElementById("setup-classroom-loading");
+  if (setupLoading) { setupLoading.classList.remove("visible"); setupLoading.style.display = "none"; }
 
   audioChunksReceived = 0;
   vadInSpeech = false;
@@ -1198,6 +1532,7 @@ function disconnect(keepScreen = false) {
 async function connect() {
   lastError = null;
   awaitingReflection = false;
+  stopSetupHardware();
   sessionTopic = getSelectedTopic();
   sessionMaterials = materialsEl.value.trim();
   cameraEnabled = useCameraEl.checked;
@@ -1208,6 +1543,17 @@ async function connect() {
   const studentsParam = classroomMode ? Array.from(selectedStudents).join(",") : "";
 
   showSession(sessionTopic);
+
+  const setupLoading = document.getElementById("setup-classroom-loading");
+  const setupText = document.getElementById("setupClassroomLoadingText");
+  if (setupLoading) { setupLoading.classList.add("visible"); setupLoading.style.display = "flex"; }
+  // #region agent log
+  const camBox = document.getElementById("cameraContainer");
+  fetch('http://127.0.0.1:7432/ingest/c84c3cea-d2ed-45e0-bc4d-419db123a810',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc1cf4'},body:JSON.stringify({sessionId:'fc1cf4',location:'app.js:connect',message:'loading shown',data:{cameraEnabled,setupDisplay:setupScreen?setupScreen.style.display:null,sessionDisplay:sessionScreen?sessionScreen.style.display:null,camContainerVisible:!!(camBox&&camBox.classList.contains('visible'))},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+  // #endregion
+  if (setupText) setupText.textContent = classroomMode
+    ? "Setting up classroom… Initializing materials for your students."
+    : "Preparing your session…";
 
   if (!playbackContext) playbackContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: RECV_SAMPLE_RATE });
   if (playbackContext.state === "suspended") await playbackContext.resume();
@@ -1264,15 +1610,27 @@ async function connect() {
 
       // Session is ready: server has created the Live session with pre-session materials in context; start mic/camera/timer now
       if (msg.type === "session_ready") {
+        const setupLoading = document.getElementById("setup-classroom-loading");
+        if (setupLoading) { setupLoading.classList.remove("visible"); setupLoading.style.display = "none"; }
+        sessionReady = true;
+        resetIdleTimer();
         (async () => {
           try {
             if (cameraEnabled) {
               await startCamera(true);
               await startMic(cameraStream);
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                try { ws.send(JSON.stringify({ type: "camera_feed_started" })); } catch (_) {}
+              }
             } else {
               await startMic();
             }
-            if (whiteboardEnabled) initWhiteboard();
+            if (whiteboardEnabled) {
+              initWhiteboard();
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                try { ws.send(JSON.stringify({ type: "whiteboard_opened" })); } catch (_) {}
+              }
+            }
             updateMediaLayout();
             startFrameSending();
             startTimer();
@@ -1286,29 +1644,35 @@ async function connect() {
       if (msg.type === "info") setStatus(msg.message || "", "connected");
       if (msg.type === "error") { lastError = msg.message; setStatus(msg.message, "error"); }
 
-      // Teacher transcript (from Gemini inputAudioTranscription)
+      // Teacher transcript: buffer and show placeholder until speech_end; then we clean and show accurate text (prioritize accuracy over live)
       if (msg.type === "teacher_transcript" && msg.text) {
+        resetIdleTimer();
         currentStudentEntry = null;
         if (!currentTeacherEntry) {
           currentTeacherEntry = addTranscriptEntry("You", "teacher");
         }
-        appendToEntry(currentTeacherEntry, msg.text);
+        appendToEntry(currentTeacherEntry, msg.text, { live: false });
       }
 
-      // Student transcript
+      // Student transcript — close teacher's entry so student gets a new bubble below.
       if (msg.type === "transcript" && msg.text) {
+        if (msg.name) activeSpeakerName = STUDENTS[msg.name.toLowerCase()]?.name || msg.name;
         currentTeacherEntry = null;
         if (!currentStudentEntry) {
           const speaker = classroomMode ? (activeSpeakerName || "Student") : "Student";
           currentStudentEntry = addTranscriptEntry(speaker, "student");
         }
-        appendToEntry(currentStudentEntry, msg.text);
+        appendToEntry(currentStudentEntry, msg.text, { live: true });
       }
 
-      // Solo turn complete
+      // Solo turn complete — clean student transcript in background (no gray/italic state)
       if (msg.type === "turn_complete") {
-        audioChunksReceived = 0;
+        const studentEntry = currentStudentEntry;
         currentStudentEntry = null;
+        if (studentEntry && studentEntry.rawText.trim()) {
+          cleanupEntry(studentEntry, false).catch(() => {});
+        }
+        audioChunksReceived = 0;
         setOrbState("listening");
         setStatus("Your turn \u2014 speak and pause when done.", "connected");
       }
@@ -1324,11 +1688,15 @@ async function connect() {
         }
       }
 
-      // Classroom turn complete
+      // Classroom turn complete — clean student transcript in background (no gray/italic state)
       if (msg.type === "student_turn_complete" && msg.studentId) {
+        const studentEntry = currentStudentEntry;
+        currentStudentEntry = null;
+        if (studentEntry && studentEntry.rawText.trim()) {
+          cleanupEntry(studentEntry, false).catch(() => {});
+        }
         deactivateStudentOrb(msg.studentId);
         audioChunksReceived = 0;
-        currentStudentEntry = null;
         setStatus("Your turn \u2014 speak and pause when done.", "connected");
       }
 
@@ -1347,6 +1715,9 @@ async function connect() {
 
       // Audio (classroom)
       if (msg.type === "classroom_audio" && msg.base64) {
+        // #region agent log
+        fetch('http://127.0.0.1:7432/ingest/c84c3cea-d2ed-45e0-bc4d-419db123a810',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc1cf4'},body:JSON.stringify({sessionId:'fc1cf4',location:'app.js:ws.classroom_audio',message:'received classroom_audio',data:{awaitingReflection},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
+        // #endregion
         const binary = atob(msg.base64);
         const bytes = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
@@ -1370,6 +1741,7 @@ async function connect() {
 
 // ── Controls ─────────────────────────────────────────────────────────────────
 startBtn.addEventListener("click", async () => {
+  if (!customTopic || !customTopic.value.trim()) return;
   if (classroomMode && selectedStudents.size < 2) return;
   if (!getSelectedTopic()) return;
   playButtonSound("confirm");
@@ -1381,8 +1753,9 @@ startBtn.addEventListener("click", async () => {
 stopBtn.addEventListener("click", () => {
   playButtonSound("end");
   if (ws && ws.readyState === WebSocket.OPEN) {
-    try { ws.send(JSON.stringify({ type: "request_reflection" })); } catch (_) {}
     awaitingReflection = true;
+    stopPlayback();
+    try { ws.send(JSON.stringify({ type: "request_reflection" })); } catch (_) {}
     stopBtn.disabled = true;
     sessionScreen.style.display = "none";
     if (reflectionLoadingScreen) reflectionLoadingScreen.classList.add("visible");
@@ -1391,34 +1764,26 @@ stopBtn.addEventListener("click", () => {
   }
 });
 
+const timeoutStayBtn = document.getElementById("timeoutStayBtn");
+if (timeoutStayBtn) {
+  timeoutStayBtn.addEventListener("click", () => {
+    hideTimeoutModal();
+  });
+}
+
 muteBtn.addEventListener("click", () => {
   micMuted = !micMuted;
   muteBtn.innerHTML = micMuted
     ? '<span class="icon">&#x1F507;</span> Unmute'
     : '<span class="icon">&#x1F3A4;</span> Mute';
   muteBtn.classList.toggle("muted", micMuted);
-  // Always reset mic indicator (it'll re-activate when VAD detects speech after unmute)
-  setMicActive(false);
-  // Reset VAD state on mute so it doesn't get stuck
   if (micMuted) {
+    setMicActive(false);
     vadInSpeech = false;
     vadSilenceCount = 0;
+  } else {
+    setMicActive(!!micStream?.getAudioTracks?.().length);
   }
-});
-
-doneSpeakingBtn.addEventListener("click", () => {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  try { ws.send(JSON.stringify({ type: "speech_end" })); } catch (_) {}
-  teacherSpeechEnded = true;
-  vadInSpeech = false;
-  vadSilenceCount = 0;
-  setOrbState("thinking");
-  setMicActive(false);
-
-  if (currentTeacherEntry && currentTeacherEntry.rawText.trim()) {
-    cleanupEntry(currentTeacherEntry);
-  }
-  currentTeacherEntry = null;
 });
 
 camToggleBtn.addEventListener("click", async () => {
@@ -1442,7 +1807,12 @@ camToggleBtn.addEventListener("click", async () => {
 
 wbToggleBtn.addEventListener("click", () => {
   whiteboardEnabled = !whiteboardEnabled;
-  if (whiteboardEnabled && !whiteboardInited) initWhiteboard();
+  if (whiteboardEnabled) {
+    if (!whiteboardInited) initWhiteboard();
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: "whiteboard_opened" })); } catch (_) {}
+    }
+  }
   updateMediaLayout();
 });
 
@@ -1456,12 +1826,13 @@ screenToggleBtn.addEventListener("click", async () => {
       screenEnabled = true;
       updateMediaLayout(); // Show container before stream starts
       await startScreenShare();
-      // Re-start frame sending so it picks up screen share
       startFrameSending();
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try { ws.send(JSON.stringify({ type: "screen_share_started" })); } catch (_) {}
+      }
     } catch (e) {
       screenEnabled = false;
       updateMediaLayout();
-      // User cancelled the share picker or error — silent fail
       if (e.name !== "NotAllowedError") {
         setStatus("Screen share failed: " + e.message, "error");
       }
@@ -1472,6 +1843,7 @@ screenToggleBtn.addEventListener("click", async () => {
 function sendChatMessage() {
   const text = chatInput.value.trim();
   if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+  resetIdleTimer();
   try { ws.send(JSON.stringify({ type: "text_input", text })); } catch (_) {}
   // Show typed message in transcript
   const entry = addTranscriptEntry("You (typed)", "teacher");
@@ -1528,5 +1900,4 @@ async function saveSession(data) {
 }
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
-loadTopics();
 initFirebase();

@@ -66,11 +66,15 @@ type SessionEntry = { role: 'teacher' | 'student'; name: string; text: string; t
 
 const GESTURE_INSTRUCTION = `
 ## Visual awareness
-You receive a live image stream from the teacher. It may be their camera (face, gestures, paper they hold up) or an on-screen whiteboard they draw on — or both over time. Pay close attention to what they write, draw, point at, or hold up. Occasionally — but not every turn — reference what you see naturally, the way a real student would: "Oh I can see you're pointing at that part — does that mean...?" or "So the diagram on the board shows... right?" Don't narrate everything visually. Only mention what they're showing when it's relevant to the explanation. If it's camera-only, body language matters (uncertainty, pauses). If it's whiteboard-heavy, treat it like a classroom board: read labels and follow arrows and diagrams.`;
+You receive a live image stream from the teacher — their camera (face, gestures, paper they hold up) and/or an on-screen whiteboard they draw on. When the teacher has the camera on, you are receiving the feed and you can see them. Never say the camera is off or that you cannot see the teacher when they have the camera on. Pay close attention to what they write, draw, point at, or hold up. Occasionally — but not every turn — reference what you see naturally, the way a real student would: "Oh I can see you're pointing at that part — does that mean...?" or "So the diagram on the board shows... right?" Don't narrate everything visually. Only mention what they're showing when it's relevant to the explanation. If it's camera-only, body language matters (uncertainty, pauses). If it's whiteboard-heavy, treat it like a classroom board: read labels and follow arrows and diagrams.
+
+**Non-verbal cues (video):** Treat the teacher's head nods as agreement or "yes" and head shakes as disagreement or "no". These count as full responses — if you see a clear nod, respond as if they said "yes"; if you see a clear shake, respond as if they said "no". You do not need them to say the words out loud. Watch the video for these gestures every time you respond.`;
 
 const GESTURE_INSTRUCTION_VOICE_ONLY = `
 ## Senses
-This is a voice-only session. You can only hear the teacher.`;
+This is a voice-only session. You can only hear the teacher.
+
+**Non-verbal sounds:** Treat "mhm", "mm-hmm", "uh-huh" and similar back-channel sounds as agreement or acknowledgment — the same as "yes" or "I'm following". Respond accordingly without requiring the teacher to say full sentences.`;
 
 function getClassroomInstruction(topic: string, studentIds: string[], materials: string, video: boolean): string {
   const studentList = studentIds
@@ -107,11 +111,11 @@ Never skip this prefix — the interface depends on it to show who is speaking.
 - Students are aware of each other and can build on, disagree with, or react to what others said.
 - Keep it realistic: not every student responds every turn.
 - Students direct questions at the teacher. One question per turn, maximum.
-- Sound like real people: use "wait", "hold on", "so basically", "hmm". Have genuine reactions.
+- Sound like real people: use "wait", "hold on", "so basically", "hmm". Treat teacher "mhm" / "mm-hmm" as agreement. Have genuine reactions.
 - Never explain the topic yourself. Never be sycophantic.
 
 ## Starting the session
-Have one student greet the teacher briefly and indicate the class is ready. Keep it short and natural.`;
+One student must greet the teacher out loud as the very first response (e.g. "Hi, we're ready when you are"). Do not say you cannot see or hear the teacher—greet them and indicate the class is ready.`;
 }
 
 const PERSONA_TRAITS: Record<string, string> = {
@@ -144,6 +148,7 @@ You are NOT a blank slate. You come in with partial knowledge, possible misconce
 
 **Sound like a real person:**
 - Use natural, conversational speech: "wait", "so basically", "hold on", "oh okay", "hmm"
+- Treat "mhm", "mm-hmm", "uh-huh" as agreement or acknowledgment — same as "yes" or "I'm following". Respond accordingly.
 - Vary your reactions — don't ask a question every single turn. Sometimes just react ("okay that actually makes sense") and let the teacher continue.
 - Show specific confusion: not "I don't understand" but "I'm following you up until the part about X — what happens there?"
 - Have genuine "aha!" moments: "Oh — so that's WHY it works like that. I was thinking it was just..."
@@ -164,7 +169,7 @@ You are NOT a blank slate. You come in with partial knowledge, possible misconce
 ${video ? GESTURE_INSTRUCTION.trim() : GESTURE_INSTRUCTION_VOICE_ONLY.trim()}
 
 ## Starting the session
-Greet the teacher briefly and naturally — like you'd greet a tutor who just sat down. Keep it short. Then indicate you're ready to listen.`;
+Your very first response must be a short spoken greeting (e.g. "Hi, ready when you are"). Do not say you cannot see or hear the teacher—greet them and indicate you're ready to listen.`;
 }
 
 function getClassroomStudentInstruction(topic: string, studentId: string, allStudentIds: string[], materials: string, video: boolean): string {
@@ -194,12 +199,13 @@ You are aware your classmates are in the room.
 During the session you'll occasionally receive a message formatted as:
   [Classroom] Name: "what they said"
 
-This means that classmate just spoke. Treat it exactly as if you heard them say it out loud in class. You may:
+This means that classmate just spoke. **Memorize these lines** — treat them as part of the ongoing conversation. You may:
 - Agree, build on it, or express the same confusion ("yeah I was wondering that too")
 - Politely push back or correct them if they're wrong
+- **Reference the peer by name** when it's natural: e.g. "Like Marcus just asked, why does...?" or "I had the same question as Lily."
 - Stay quiet if you have nothing to add — **not every classmate message requires a response from you**
 
-You must **never speak AS another student** or invent their words.
+You must **never speak AS another student** or invent their words. Remember the context of what the teacher and other students have said so you can build on it.
 
 ## Your prior knowledge
 ${materialsSection}
@@ -211,6 +217,7 @@ The teacher may share files during the lesson. When you receive a message that t
 
 **Sound like a real person:**
 - Use natural speech: "wait", "so basically", "hold on", "oh okay", "hmm"
+- Treat "mhm", "mm-hmm", "uh-huh" as agreement or acknowledgment — respond accordingly.
 - Vary your reactions — sometimes just react and stay quiet, sometimes jump in. Not every turn requires a question.
 - Show specific confusion: not "I don't understand" but "I'm following you until the part about X"
 - Have genuine "aha!" moments
@@ -228,7 +235,7 @@ The teacher may share files during the lesson. When you receive a message that t
 ${video ? GESTURE_INSTRUCTION.trim() : GESTURE_INSTRUCTION_VOICE_ONLY.trim()}
 
 ## Starting
-Greet the teacher briefly and naturally. Keep it short. Then indicate you're ready to listen.`;
+Your very first response must be a short spoken greeting. Do not say you cannot see or hear the teacher—greet them and indicate you're ready to listen.`;
 }
 
 // ── Gemini helper calls ──────────────────────────────────────────────────────
@@ -264,22 +271,29 @@ async function generateCoachingTip(
   ai: GoogleGenAI,
   topic: string,
   teacherSpeech: string,
+  media?: { camera?: boolean; whiteboard?: boolean; screen?: boolean },
 ): Promise<string | null> {
   if (teacherSpeech.split(/\s+/).length < 12) return null;
+  const hasVideo = media?.camera || media?.whiteboard || media?.screen;
+  const mediaNote = hasVideo
+    ? ` The teacher may have camera (${media?.camera ? 'on' : 'off'}), whiteboard (${media?.whiteboard ? 'on' : 'off'}), or screen share (${media?.screen ? 'on' : 'off'}) active. If they have visuals available, comment on whether they are using them effectively (e.g. pointing at the board, using the screen to illustrate). Suggest using the whiteboard or screen if it could clarify the point.`
+    : '';
   try {
     const result = await ai.models.generateContent({
       model: FAST_MODEL,
       contents: [{
         role: 'user',
         parts: [{ text:
-          `A person is teaching "${topic}" and just said:\n\n` +
+          `A person is teaching "${topic}". Below is a transcript of what they just said (speech-to-text; it may have errors or miss words):\n\n` +
           `"${teacherSpeech}"\n\n` +
-          `Give ONE short coaching hint (1-2 sentences max). Decide which is most useful:\n\n` +
+          `Give ONE short coaching hint (1-2 sentences max). Do not assume the transcript is exact — focus on teaching clarity and delivery. Decide which is most useful:\n\n` +
           `PRIMARILY focus on teaching clarity and delivery:\n` +
           `- Are they being clear, or is the explanation vague/hard to follow?\n` +
           `- Are they using concrete examples or staying too abstract?\n` +
           `- Could a specific analogy make this click for a student?\n` +
           `- Are they speaking confidently, or does the explanation feel uncertain?\n\n` +
+          `If the teacher has camera, whiteboard, or screen share active, comment on use of visuals: are they pointing, drawing, or showing something that helps? Could they use the board or screen more?\n` +
+          mediaNote + '\n\n' +
           `ALSO flag subject-matter issues if they arise:\n` +
           `- If the explanation is so generic it could apply to anything, point out the specific part of "${topic}" that needs more depth\n` +
           `- If a student likely just asked something and this response didn't really address it, note what was missed\n\n` +
@@ -324,15 +338,15 @@ async function generateReflection(
           `Full transcript:\n${transcript}\n\n` +
           `Return a JSON object (no markdown, no code block) with exactly these keys:\n` +
           `- "summary": string — 2-3 sentences summarising what was covered\n` +
-          `- "strengths": string[] — 2-3 specific things the teacher did well\n` +
-          `- "gaps": string[] — 2-3 concepts that were missed, skipped, or explained unclearly (empty array if none)\n` +
+          `- "strengths": string[] — 2-3 specific things the teacher did well. Wrap the key phrase in **asterisks** (e.g. "**Clear examples** made the concept stick.")\n` +
+          `- "gaps": string[] — 2-3 concepts that were missed, skipped, or explained unclearly (empty array if none). Wrap the key problem in **asterisks** (e.g. "**The second step** was unclear.")\n` +
           `- "topQuestions": string[] — the 3 most insightful student questions verbatim (fewer if session was short)\n` +
-          `- "improvements": string[] — 2-3 concrete, actionable suggestions for next time (at most 1 short sentence per item)\n` +
+          `- "improvements": string[] — 2-3 concrete, actionable suggestions. Wrap the key action in **asterisks** (e.g. "**Use the whiteboard** for the diagram.")\n` +
           `- "presentationSkills": object with exactly these three keys, each a single short sentence (or empty string if not applicable):\n` +
           `  - "visualsAndGestures": Did the teacher use the camera, hands, or whiteboard effectively to demonstrate points?\n` +
           `  - "explanations": Were the explanations concise and clear, or rambling?\n` +
           `  - "mediaUsage": How effectively were screen sharing or shared files/materials utilized?\n\n` +
-          `Keep every bullet and presentationSkills value to at most one short sentence. Be explicit and not text-heavy. Return ONLY valid JSON. No extra text.`
+          `Keep every bullet and presentationSkills value to at most one short sentence. Be explicit and useful. Return ONLY valid JSON. No extra text.`
         }]
       }],
     });
@@ -623,7 +637,7 @@ async function main() {
       return `[The teacher has shared a file: "${name}".]${error ? ` (${error})` : ''}`;
     }
 
-    async function onTeacherSpeechEnd() {
+    async function onTeacherSpeechEnd(media?: { camera?: boolean; whiteboard?: boolean; screen?: boolean }) {
       const text = teacherTranscriptBuf.trim();
       teacherTranscriptBuf = '';
 
@@ -635,7 +649,7 @@ async function main() {
       const now = Date.now();
       if (now > coachingCooldown) {
         coachingCooldown = now + 20_000;
-        generateCoachingTip(ai, topic, text).then(tip => {
+        generateCoachingTip(ai, topic, text, media).then(tip => {
           if (tip) sendJson({ type: 'coaching_tip', tip });
         });
       }
@@ -711,7 +725,9 @@ async function main() {
                 if (id === studentIds[0]) {
                   sendJson({ type: 'session_ready' });
                   sendJson({ type: 'info', message: `Your classroom is ready. Start explaining: ${topic}` });
-                  try { sess.sendRealtimeInput({ text: `The teacher has just walked in. Greet them briefly and naturally.` }); } catch (_) {}
+                  setTimeout(() => {
+                    try { sess.sendRealtimeInput({ text: `The teacher has just walked in. Say a short greeting out loud right now (e.g. "Hi, we're ready when you are"). Your first response must be this greeting—do not skip it.` }); } catch (_) {}
+                  }, 400);
                 }
               },
               onmessage: (msg: types.LiveServerMessage) => {
@@ -726,7 +742,7 @@ async function main() {
                 if (msg.serverContent?.outputTranscription?.text) {
                   const chunk = msg.serverContent.outputTranscription.text;
                   transcriptBuf += ' ' + chunk;
-                  if (activeSpeaker === id) sendJson({ type: 'transcript', text: chunk });
+                  if (activeSpeaker === id) sendJson({ type: 'transcript', text: chunk, name: id });
                 }
 
                 // Student audio
@@ -829,9 +845,11 @@ async function main() {
               console.log('[Dasko] Live session opened, topic:', topic);
               sendJson({ type: 'session_ready' });
               sendJson({ type: 'info', message: `Your student is ready. Start explaining: ${topic}` });
-              try {
-                session!.sendRealtimeInput({ text: `The teacher has joined. Greet them briefly and ask them to start explaining: ${topic}.` });
-              } catch (_) {}
+              setTimeout(() => {
+                try {
+                  session!.sendRealtimeInput({ text: `The teacher has joined. Say a short greeting out loud right now (e.g. "Hi, ready when you are" or "Hey!"). Then ask them to start explaining: ${topic}. Your first response must be this greeting—do not skip it.` });
+                } catch (_) {}
+              }, 400);
             },
             onmessage: (message: types.LiveServerMessage) => {
               if (message.serverContent?.inputTranscription?.text) {
@@ -912,7 +930,13 @@ async function main() {
         }
         try {
           const parsed = JSON.parse(data.toString());
-          if (parsed.type === 'speech_end') { onTeacherSpeechEnd(); return; }
+          if (parsed.type === 'speech_start') {
+            sessionMap.forEach(sess => {
+              try { sess.sendRealtimeInput({ text: '[The teacher is speaking. Stop talking and listen. Do not respond until they finish.]' }); } catch (_) {}
+            });
+            return;
+          }
+          if (parsed.type === 'speech_end') { onTeacherSpeechEnd(parsed.media); return; }
           if (parsed.type === 'request_reflection') {
             if (reflectionRequested) return;
             reflectionRequested = true;
@@ -924,6 +948,21 @@ async function main() {
           }
           if (parsed.type === 'video_frame' && typeof parsed.base64 === 'string') {
             sessionMap.forEach(sess => { try { sess.sendRealtimeInput({ media: { data: parsed.base64, mimeType: 'image/jpeg' } }); } catch (_) {} });
+          }
+          if (parsed.type === 'screen_share_started') {
+            sessionMap.forEach(sess => {
+              try { sess.sendRealtimeInput({ text: '[The teacher is now sharing their screen. Pay attention to what they show on screen.]' }); } catch (_) {}
+            });
+          }
+          if (parsed.type === 'camera_feed_started') {
+            sessionMap.forEach(sess => {
+              try { sess.sendRealtimeInput({ text: '[You are receiving the teacher\'s live camera feed. You can see them.]' }); } catch (_) {}
+            });
+          }
+          if (parsed.type === 'whiteboard_opened') {
+            sessionMap.forEach(sess => {
+              try { sess.sendRealtimeInput({ text: '[The teacher has the whiteboard open. You can see it; it may be blank or have content.]' }); } catch (_) {}
+            });
           }
           if (parsed.type === 'material_file' && parsed.base64 && parsed.name) {
             const name = parsed.name || 'file';
@@ -953,7 +992,7 @@ async function main() {
         }
         try {
           const msg = JSON.parse(data.toString());
-          if (msg.type === 'speech_end') { onTeacherSpeechEnd(); return; }
+          if (msg.type === 'speech_end') { onTeacherSpeechEnd(msg.media); return; }
           if (msg.type === 'request_reflection') {
             if (reflectionRequested) return;
             reflectionRequested = true;
@@ -965,6 +1004,15 @@ async function main() {
           }
           if (msg.type === 'video_frame' && typeof msg.base64 === 'string') {
             try { session.sendRealtimeInput({ media: { data: msg.base64, mimeType: 'image/jpeg' } }); } catch (_) {}
+          }
+          if (msg.type === 'screen_share_started') {
+            try { session.sendRealtimeInput({ text: '[The teacher is now sharing their screen. Pay attention to what they show on screen.]' }); } catch (_) {}
+          }
+          if (msg.type === 'camera_feed_started') {
+            try { session.sendRealtimeInput({ text: '[You are receiving the teacher\'s live camera feed. You can see them.]' }); } catch (_) {}
+          }
+          if (msg.type === 'whiteboard_opened') {
+            try { session.sendRealtimeInput({ text: '[The teacher has the whiteboard open. You can see it; it may be blank or have content.]' }); } catch (_) {}
           }
           if (msg.type === 'material_file' && msg.base64 && msg.name) {
             const name = msg.name || 'file';
