@@ -9,6 +9,7 @@ RUN npm ci
 
 # App and frontend
 COPY server.ts ./
+COPY server ./server/
 COPY frontend ./frontend/
 
 # Cloud Run sets PORT; server reads process.env.PORT
