@@ -183,10 +183,12 @@ let sessionStartTime = 0;
 let sessionDuration  = 0;
 let timerInterval    = null;
 
-// Idle timeout: 2 min no speech → modal, then 30s countdown → end session
-const IDLE_WARN_MS   = 2 * 60 * 1000;
+// Idle timeout: 60s no activity (voice, click, keypress, upload) → modal, then 30s countdown → end session
+const IDLE_WARN_MS      = 60 * 1000;
+const IDLE_CHECK_MS     = 5000;
 const IDLE_COUNTDOWN_SEC = 30;
-let idleTimer        = null;
+let lastActivityTimestamp = 0;
+let idleCheckInterval   = null;
 let idleCountdownInterval = null;
 let idleCountdownSec = IDLE_COUNTDOWN_SEC;
 
@@ -1368,6 +1370,7 @@ async function sendSessionMaterialFile(file) {
     try {
       ws.send(JSON.stringify({ type: "material_file", name: file.name, mimeType: mimeType || "application/octet-stream", base64 }));
       showSessionToast(`Shared "${file.name}" with class`);
+      updateActivity();
     } catch (_) {}
   }
 }
@@ -1421,23 +1424,29 @@ function startFrameSending() {
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, 640, 360);
 
-    let drewScreen = false;
-    let drewCamera = false;
+    // Unified "virtual canvas": Layer 1 screen (background), Layer 2 whiteboard (overlay), Layer 3 camera (corner circle)
     if (screenEnabled && screenFeed && screenFeed.srcObject) {
-      try { ctx.drawImage(screenFeed, 0, 0, 640, 360); drewScreen = true; } catch (_) {}
+      try { ctx.drawImage(screenFeed, 0, 0, 640, 360); } catch (_) {}
+    }
+    if (whiteboardEnabled && whiteboardCanvas.width) {
+      ctx.save();
+      ctx.globalAlpha = 0.5;
+      ctx.drawImage(whiteboardCanvas, 0, 0, 640, 360);
+      ctx.restore();
     }
     if (cameraEnabled && cameraPipFeed && cameraPipFeed.srcObject) {
       try {
-        if (drewScreen) {
-          ctx.drawImage(cameraPipFeed, 640 - 180, 360 - 120, 160, 120);
-        } else {
-          ctx.drawImage(cameraPipFeed, 0, 0, 640, 360);
-        }
-        drewCamera = true;
+        const r = 56;
+        const x = 640 - r - 16;
+        const y = 360 - r - 16;
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(x + r, y + r, r, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.clip();
+        ctx.drawImage(cameraPipFeed, x, y, r * 2, r * 2);
+        ctx.restore();
       } catch (_) {}
-    }
-    if (whiteboardEnabled && whiteboardCanvas.width) {
-      ctx.drawImage(whiteboardCanvas, 0, 0, 640, 360);
     }
 
     const base64 = compositeCanvas.toDataURL("image/jpeg", 0.7).split(",")[1];
@@ -1446,18 +1455,45 @@ function startFrameSending() {
     frameCount++;
     // #region agent log
     if (frameCount % 5 === 1) {
-      fetch('http://127.0.0.1:7432/ingest/c84c3cea-d2ed-45e0-bc4d-419db123a810',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc1cf4'},body:JSON.stringify({sessionId:'fc1cf4',location:'app.js:startFrameSending',message:'video_frame sent',data:{cameraEnabled,screenEnabled,cameraPipFeedReady:cameraPipFeed?cameraPipFeed.readyState:null,screenFeedReady:screenFeed?screenFeed.readyState:null,drewCamera,drewScreen,frameCount},timestamp:Date.now(),hypothesisId:'H2,H3'})}).catch(()=>{});
+      const drewCamera = !!(cameraEnabled && cameraPipFeed?.srcObject);
+      const drewScreen = !!(screenEnabled && screenFeed?.srcObject);
+      fetch('http://127.0.0.1:7432/ingest/c84c3cea-d2ed-45e0-bc4d-419db123a810',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc1cf4'},body:JSON.stringify({sessionId:'fc1cf4',location:'app.js:startFrameSending',message:'video_frame sent',data:{cameraEnabled,screenEnabled,drewCamera,drewScreen,frameCount},timestamp:Date.now(),hypothesisId:'H2,H3'})}).catch(()=>{});
     }
     // #endregion
   }, 1000);
 }
 
 // ── Mic capture ──────────────────────────────────────────────────────────────
+function resumeMicContextOnGesture() {
+  if (micContext && micContext.state === "suspended") {
+    micContext.resume().catch(() => {});
+  }
+}
+// One-time listener: resume mic AudioContext when browser has suspended it (e.g. autoplay policy)
+let micResumeListenerAttached = false;
+function attachMicResumeOnGesture() {
+  if (micResumeListenerAttached) return;
+  micResumeListenerAttached = true;
+  const resume = () => {
+    resumeMicContextOnGesture();
+    document.removeEventListener("click", resume);
+    document.removeEventListener("keydown", resume);
+    document.removeEventListener("touchstart", resume);
+  };
+  document.addEventListener("click", resume, { once: true });
+  document.addEventListener("keydown", resume, { once: true });
+  document.addEventListener("touchstart", resume, { once: true });
+}
+
 async function startMic(existingStream = null) {
   micStream = existingStream || await navigator.mediaDevices.getUserMedia({ audio: true });
   // Use only the audio tracks to avoid re-stopping video tracks on disconnect
   const audioOnlyStream = new MediaStream(micStream.getAudioTracks());
   micContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SEND_SAMPLE_RATE });
+  if (micContext.state === "suspended") attachMicResumeOnGesture();
+  micContext.addEventListener("statechange", () => {
+    if (micContext && micContext.state === "suspended") attachMicResumeOnGesture();
+  });
   const source = micContext.createMediaStreamSource(audioOnlyStream);
 
   // Pre-gain so quieter / far-away speech is audible to the AI (e.g. when teacher is far from device)
@@ -1494,7 +1530,7 @@ async function startMic(existingStream = null) {
         vadInSpeech = false;
         vadSilenceCount = 0;
         teacherSpeechEnded = true;
-        setMicActive(false);
+        setMicActive(!micMuted);
         if (currentOrbState !== "speaking") setOrbState("thinking");
         try { ws.send(JSON.stringify({ type: "speech_end", media: { camera: cameraEnabled, whiteboard: whiteboardEnabled, screen: screenEnabled } })); } catch (_) {}
 
@@ -1547,15 +1583,37 @@ function stopTimer() {
   if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
 }
 
-// ── Idle timeout ──────────────────────────────────────────────────────────────
+// ── Idle timeout (60s no activity; check every 5s) ─────────────────────────────
+function updateActivity() {
+  lastActivityTimestamp = Date.now();
+}
+
+function startIdleCheck() {
+  lastActivityTimestamp = Date.now();
+  if (idleCheckInterval) return;
+  idleCheckInterval = setInterval(() => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const modal = document.getElementById("timeoutModal");
+    if (modal && modal.classList.contains("visible")) return;
+    if (Date.now() - lastActivityTimestamp >= IDLE_WARN_MS) showTimeoutModal();
+  }, IDLE_CHECK_MS);
+}
+
+function stopIdleCheck() {
+  if (idleCheckInterval) {
+    clearInterval(idleCheckInterval);
+    idleCheckInterval = null;
+  }
+}
+
 function resetIdleTimer() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  if (idleTimer) clearTimeout(idleTimer);
-  idleTimer = setTimeout(() => {
-    idleTimer = null;
-    showTimeoutModal();
-  }, IDLE_WARN_MS);
+  updateActivity();
 }
+
+window.addEventListener("mousedown", updateActivity);
+window.addEventListener("keypress", updateActivity);
+window.addEventListener("touchstart", updateActivity);
 
 function showTimeoutModal() {
   const modal = document.getElementById("timeoutModal");
@@ -1852,7 +1910,7 @@ function disconnect(keepScreen = false) {
   if (frameInterval) { clearInterval(frameInterval); frameInterval = null; }
   stopTimer();
   stopPlayback();
-  if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+  stopIdleCheck();
   if (idleCountdownInterval) { clearInterval(idleCountdownInterval); idleCountdownInterval = null; }
   hideTimeoutModal();
   const setupLoading = document.getElementById("setup-classroom-loading");
@@ -1964,7 +2022,8 @@ async function connect() {
         const setupLoading = document.getElementById("setup-classroom-loading");
         if (setupLoading) { setupLoading.classList.remove("visible"); setupLoading.style.display = "none"; }
         sessionReady = true;
-        resetIdleTimer();
+        updateActivity();
+        startIdleCheck();
         (async () => {
           try {
             if (cameraEnabled) {
@@ -1994,6 +2053,11 @@ async function connect() {
       // Status
       if (msg.type === "info") setStatus(msg.message || "", "connected");
       if (msg.type === "error") { lastError = msg.message; setStatus(msg.message, "error"); }
+
+      // Barge-in: server signals AI was interrupted — flush playback so no ghost audio
+      if (msg.type === "interrupted" || msg.interrupted === true) {
+        stopPlayback();
+      }
 
       // Teacher transcript: buffer and show placeholder until speech_end; then we clean and show accurate text (prioritize accuracy over live)
       if (msg.type === "teacher_transcript" && msg.text) {

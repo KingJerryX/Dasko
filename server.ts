@@ -138,6 +138,8 @@ Never skip this prefix — the interface depends on it to show who is speaking.
 - Sound like real people: use "wait", "hold on", "so basically", "hmm". Treat teacher "mhm" / "mm-hmm" as agreement. Have genuine reactions.
 - Never explain the topic yourself. Never be sycophantic.
 
+**If the teacher interrupts:** If the teacher speaks while a student is talking, that student **stops immediately.** Listen to the teacher's full point. When resuming, start with a brief acknowledgment ("Oh, I see," "Got it, let me adjust") and incorporate their feedback into the next thought.
+
 ## Starting the session
 One student must greet the teacher out loud as the very first response (e.g. "Hi, we're ready when you are"). Do not say you cannot see or hear the teacher—greet them and indicate the class is ready.`;
 }
@@ -189,6 +191,8 @@ You are NOT a blank slate. You come in with partial knowledge, possible misconce
 - If the teacher asks you a question back, redirect naturally: "I mean, I have a guess, but I'd rather hear you explain it properly."
 - Don't be sycophantic. "Great explanation!" is not something a real student says — they just nod and ask the next question.
 - Stay on topic. If you drift, the teacher will redirect you.
+
+**If the teacher interrupts you:** If the teacher speaks while you are talking, **stop immediately.** Listen to their full point. When you resume, start with a brief acknowledgment like "Oh, I see," or "Got it, let me adjust," and incorporate their feedback directly into your next thought.
 
 ${video ? GESTURE_INSTRUCTION.trim() : GESTURE_INSTRUCTION_VOICE_ONLY.trim()}
 
@@ -257,6 +261,8 @@ The teacher may share files during the lesson. When you receive a message that t
 - Never explain the topic yourself.
 - Don't be sycophantic.
 - Stay on topic.
+
+**If the teacher interrupts you:** If the teacher speaks while you are talking, **stop immediately.** Listen to their full point. When you resume, start with a brief acknowledgment like "Oh, I see," or "Got it, let me adjust," and incorporate their feedback directly into your next thought.
 
 ${video ? GESTURE_INSTRUCTION.trim() : GESTURE_INSTRUCTION_VOICE_ONLY.trim()}
 
@@ -966,6 +972,7 @@ async function main() {
         try {
           const parsed = JSON.parse(data.toString());
           if (parsed.type === 'speech_start') {
+            sendJson({ type: 'interrupted', interrupted: true });
             sessionMap.forEach(sess => {
               try { sess.sendRealtimeInput({ text: '[The teacher is speaking. Stop talking and listen. Do not respond until they finish.]' }); } catch (_) {}
             });
@@ -1027,6 +1034,11 @@ async function main() {
         }
         try {
           const msg = JSON.parse(data.toString());
+          if (msg.type === 'speech_start') {
+            sendJson({ type: 'interrupted', interrupted: true });
+            try { session.sendRealtimeInput({ text: '[The teacher is speaking. Stop talking and listen. Do not respond until they finish.]' }); } catch (_) {}
+            return;
+          }
           if (msg.type === 'speech_end') { onTeacherSpeechEnd(msg.media); return; }
           if (msg.type === 'request_reflection') {
             if (reflectionRequested) return;
