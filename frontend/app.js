@@ -166,6 +166,8 @@ let cameraFloatTop = 0;
 
 // Frame sending
 let frameInterval   = null;
+let lastSpeechFrameTime = 0;
+const FRAME_SPEECH_WINDOW_MS = 4000;
 const compositeCanvas = document.createElement("canvas");
 compositeCanvas.width = 640;
 compositeCanvas.height = 360;
@@ -174,6 +176,9 @@ compositeCanvas.height = 360;
 let transcriptEntryId = 0;
 let currentTeacherEntry = null;
 let currentStudentEntry = null;
+let lastTeacherFinalizedAt = 0;
+let lastStudentFinalizedAt = 0;
+const STALE_CHUNK_WINDOW_MS = 600;
 const liveCleanupTimers = new Map();
 const liveCleanupInFlight = new Map();
 const LIVE_CLEANUP_DEBOUNCE_MS = 250;
@@ -467,7 +472,7 @@ function getSessionLanguage() {
 // ── File upload handling ──────────────────────────────────────────────────────
 const ACCEPTED_TYPES = new Set([
   "application/pdf",
-  "image/png", "image/jpeg", "image/gif", "image/webp",
+  "image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp",
   "text/plain", "text/markdown", "text/csv",
 ]);
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
@@ -546,6 +551,10 @@ async function processFiles(files) {
       else if (ext === "txt") mimeType = "text/plain";
       else if (ext === "csv") mimeType = "text/csv";
       else if (ext === "pdf") mimeType = "application/pdf";
+      else if (ext === "jpg" || ext === "jpeg") mimeType = "image/jpeg";
+      else if (ext === "png") mimeType = "image/png";
+      else if (ext === "gif") mimeType = "image/gif";
+      else if (ext === "webp") mimeType = "image/webp";
     }
 
     if (!ACCEPTED_TYPES.has(mimeType)) {
@@ -708,10 +717,7 @@ function pcm16ToFloat32(pcm16) {
 // ── Audio playback ───────────────────────────────────────────────────────────
 async function playPcm24k(arrayBuffer) {
   if (!arrayBuffer || arrayBuffer.byteLength === 0) return;
-  // #region agent log
-  fetch('http://127.0.0.1:7432/ingest/c84c3cea-d2ed-45e0-bc4d-419db123a810',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc1cf4'},body:JSON.stringify({sessionId:'fc1cf4',location:'app.js:playPcm24k',message:'playPcm24k entry',data:{awaitingReflection,byteLength:arrayBuffer.byteLength},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
   if (awaitingReflection) return;
-  // #endregion
   try {
     audioChunksReceived++;
     if (audioChunksReceived === 1) setOrbState("speaking");
@@ -739,9 +745,6 @@ async function playPcm24k(arrayBuffer) {
 }
 
 function stopPlayback() {
-  // #region agent log
-  fetch('http://127.0.0.1:7432/ingest/c84c3cea-d2ed-45e0-bc4d-419db123a810',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc1cf4'},body:JSON.stringify({sessionId:'fc1cf4',location:'app.js:stopPlayback',message:'stopPlayback called',data:{},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
-  // #endregion
   playbackGainNode = null;
   if (playbackContext) { try { playbackContext.close(); } catch (_) {} playbackContext = null; }
   nextPlayTime = 0;
@@ -789,7 +792,9 @@ function appendToEntry(entry, chunk, options) {
   if (!entry) return;
   const live = options && options.live !== false;
   const predict = options && options.predict === true;
-  // Keep raw chunk boundaries from ASR to avoid inserting incorrect spaces inside words.
+  if (entry.rawText && chunk && !chunk.startsWith(" ") && !entry.rawText.endsWith(" ")) {
+    entry.rawText += " ";
+  }
   entry.rawText += chunk;
   entry.textEl.textContent = live ? entry.rawText : "\u2026";
   if (predict && live) scheduleLiveCleanup(entry);
@@ -1495,17 +1500,20 @@ setupCameraDrag();
 // ── Frame sending: composite camera/screen + whiteboard so AI sees board ────
 function startFrameSending() {
   if (frameInterval) clearInterval(frameInterval);
-  let frameCount = 0;
   frameInterval = setInterval(() => {
     if (awaitingReflection) return;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     if (!cameraEnabled && !whiteboardEnabled && !screenEnabled) return;
 
+    const now = Date.now();
+    const inSpeechWindow = vadInSpeech || (now - lastSpeechFrameTime < FRAME_SPEECH_WINDOW_MS);
+    const boardOrScreenDirty = whiteboardEnabled && canvasDirty;
+    if (!inSpeechWindow && !boardOrScreenDirty && !screenEnabled) return;
+
     const ctx = compositeCanvas.getContext("2d");
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, 640, 360);
 
-    // Unified "virtual canvas": Layer 1 screen (background), Layer 2 whiteboard (overlay), Layer 3 camera (corner circle)
     if (screenEnabled && screenFeed && screenFeed.srcObject) {
       try { ctx.drawImage(screenFeed, 0, 0, 640, 360); } catch (_) {}
     }
@@ -1533,15 +1541,7 @@ function startFrameSending() {
     const base64 = compositeCanvas.toDataURL("image/jpeg", 0.7).split(",")[1];
     try { ws.send(JSON.stringify({ type: "video_frame", base64 })); } catch (_) {}
     canvasDirty = false;
-    frameCount++;
-    // #region agent log
-    if (frameCount % 5 === 1) {
-      const drewCamera = !!(cameraEnabled && cameraPipFeed?.srcObject);
-      const drewScreen = !!(screenEnabled && screenFeed?.srcObject);
-      fetch('http://127.0.0.1:7432/ingest/c84c3cea-d2ed-45e0-bc4d-419db123a810',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc1cf4'},body:JSON.stringify({sessionId:'fc1cf4',location:'app.js:startFrameSending',message:'video_frame sent',data:{cameraEnabled,screenEnabled,drewCamera,drewScreen,frameCount},timestamp:Date.now(),hypothesisId:'H2,H3'})}).catch(()=>{});
-    }
-    // #endregion
-  }, 1000);
+  }, 2000);
 }
 
 // ── Mic capture ──────────────────────────────────────────────────────────────
@@ -1596,12 +1596,13 @@ async function startMic(existingStream = null) {
 
     if (rms > SPEECH_ENERGY_THRESHOLD) {
       resetIdleTimer();
+      lastSpeechFrameTime = Date.now();
       if (!vadInSpeech) {
         vadInSpeech = true;
         teacherSpeechEnded = false;
         setMicActive(true);
         if (currentOrbState !== "speaking") setOrbState("listening");
-        stopPlayback(); // Stop student audio so teacher can interrupt naturally
+        stopPlayback();
         try { ws.send(JSON.stringify({ type: "speech_start" })); } catch (_) {}
       }
       vadSilenceCount = 0;
@@ -1611,18 +1612,24 @@ async function startMic(existingStream = null) {
         vadInSpeech = false;
         vadSilenceCount = 0;
         teacherSpeechEnded = true;
+        lastSpeechFrameTime = Date.now();
         setMicActive(!micMuted);
         if (currentOrbState !== "speaking") setOrbState("thinking");
         try { ws.send(JSON.stringify({ type: "speech_end", media: { camera: cameraEnabled, whiteboard: whiteboardEnabled, screen: screenEnabled } })); } catch (_) {}
 
+        lastTeacherFinalizedAt = Date.now();
         const entryToClean = currentTeacherEntry;
         currentTeacherEntry = null;
         if (entryToClean && entryToClean.rawText.trim()) {
-          cleanupEntry(entryToClean, true).catch(() => {});
+          cleanupEntry(entryToClean, false).catch(() => {});
         }
       }
     }
-    try { ws.send(float32ToPcm16(input)); } catch (_) {}
+    // Send mic audio only while teacher speech is active to avoid
+    // silence/noise being interpreted as new teacher turns.
+    if (vadInSpeech) {
+      try { ws.send(float32ToPcm16(input)); } catch (_) {}
+    }
   };
 
   preGain.connect(micProcessor);
@@ -1712,6 +1719,11 @@ function showTimeoutModal() {
       idleCountdownInterval = null;
       hideTimeoutModal();
       if (stopBtn && ws && ws.readyState === WebSocket.OPEN) {
+        if (screenEnabled) {
+          screenEnabled = false;
+          stopScreenShare();
+          updateMediaLayout();
+        }
         awaitingReflection = true;
         stopPlayback();
         try { ws.send(JSON.stringify({ type: "request_reflection" })); } catch (_) {}
@@ -1765,10 +1777,6 @@ function showSession(topic) {
   sessionReady = false;
   if (classroomMode) createClassroomOrbs();
   updateMediaLayout();
-  // #region agent log
-  const camVis = cameraContainer && cameraContainer.classList.contains("visible");
-  fetch('http://127.0.0.1:7432/ingest/c84c3cea-d2ed-45e0-bc4d-419db123a810',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc1cf4'},body:JSON.stringify({sessionId:'fc1cf4',location:'app.js:showSession',message:'showSession done',data:{cameraEnabled,camContainerVisible:!!camVis},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
-  // #endregion
 }
 
 const PRO_TIPS = [
@@ -2008,6 +2016,8 @@ function disconnect(keepScreen = false) {
   teacherSpeechEnded = false;
   currentTeacherEntry = null;
   currentStudentEntry = null;
+  lastTeacherFinalizedAt = 0;
+  lastStudentFinalizedAt = 0;
   activeSpeakerName = "";
   awaitingReflection = false;
   whiteboardInited = false;
@@ -2040,13 +2050,9 @@ async function connect() {
   const setupLoading = document.getElementById("setup-classroom-loading");
   const setupText = document.getElementById("setupClassroomLoadingText");
   if (setupLoading) { setupLoading.classList.add("visible"); setupLoading.style.display = "flex"; }
-  // #region agent log
-  const camBox = document.getElementById("cameraContainer");
-  fetch('http://127.0.0.1:7432/ingest/c84c3cea-d2ed-45e0-bc4d-419db123a810',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc1cf4'},body:JSON.stringify({sessionId:'fc1cf4',location:'app.js:connect',message:'loading shown',data:{cameraEnabled,setupDisplay:setupScreen?setupScreen.style.display:null,sessionDisplay:sessionScreen?sessionScreen.style.display:null,camContainerVisible:!!(camBox&&camBox.classList.contains('visible'))},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
-  // #endregion
   if (setupText) setupText.textContent = classroomMode
-    ? "Setting up classroom… Initializing materials for your students."
-    : "Preparing your session…";
+    ? "Setting up classroom\u2026 Initializing materials for your students."
+    : "Preparing your session\u2026";
 
   if (!playbackContext) playbackContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: RECV_SAMPLE_RATE });
   if (playbackContext.state === "suspended") await playbackContext.resume();
@@ -2114,17 +2120,11 @@ async function connect() {
             if (cameraEnabled) {
               await startCamera(true);
               await startMic(cameraStream);
-              if (ws && ws.readyState === WebSocket.OPEN) {
-                try { ws.send(JSON.stringify({ type: "camera_feed_started" })); } catch (_) {}
-              }
             } else {
               await startMic();
             }
             if (whiteboardEnabled) {
               initWhiteboard();
-              if (ws && ws.readyState === WebSocket.OPEN) {
-                try { ws.send(JSON.stringify({ type: "whiteboard_opened" })); } catch (_) {}
-              }
             }
             updateMediaLayout();
             startFrameSending();
@@ -2139,34 +2139,51 @@ async function connect() {
       if (msg.type === "info") setStatus(msg.message || "", "connected");
       if (msg.type === "error") { lastError = msg.message; setStatus(msg.message, "error"); }
 
-      // Barge-in: server signals AI was interrupted — flush playback so no ghost audio
+      // Barge-in: teacher interrupted the student — flush playback and finalize student bubble
       if (msg.type === "interrupted" || msg.interrupted === true) {
         stopPlayback();
+        if (currentStudentEntry) {
+          const entry = currentStudentEntry;
+          currentStudentEntry = null;
+          lastStudentFinalizedAt = Date.now();
+          if (entry.rawText.trim()) cleanupEntry(entry, false).catch(() => {});
+        }
       }
 
-      // Teacher transcript: stream partial words live and refine incrementally.
+      // Teacher transcript: append to teacher bubble; do NOT close the student bubble.
       if (msg.type === "teacher_transcript" && msg.text) {
         resetIdleTimer();
-        currentStudentEntry = null;
         if (!currentTeacherEntry) {
-          currentTeacherEntry = addTranscriptEntry("You", "teacher");
+          if (Date.now() - lastTeacherFinalizedAt < STALE_CHUNK_WINDOW_MS) {
+            // Stale chunk arriving after teacher turn was finalized — drop it
+          } else {
+            currentTeacherEntry = addTranscriptEntry("You", "teacher");
+            appendToEntry(currentTeacherEntry, msg.text, { live: true, predict: true });
+          }
+        } else {
+          appendToEntry(currentTeacherEntry, msg.text, { live: true, predict: true });
         }
-        appendToEntry(currentTeacherEntry, msg.text, { live: true, predict: true });
       }
 
-      // Student transcript — close teacher's entry so student gets a new bubble below.
+      // Student transcript: append to student bubble; do NOT close the teacher bubble.
       if (msg.type === "transcript" && msg.text) {
         if (msg.name) activeSpeakerName = STUDENTS[msg.name.toLowerCase()]?.name || msg.name;
-        currentTeacherEntry = null;
         if (!currentStudentEntry) {
-          const speaker = classroomMode ? (activeSpeakerName || "Student") : "Student";
-          currentStudentEntry = addTranscriptEntry(speaker, "student");
+          if (Date.now() - lastStudentFinalizedAt < STALE_CHUNK_WINDOW_MS) {
+            // Stale chunk arriving after student turn was finalized — drop it
+          } else {
+            const speaker = classroomMode ? (activeSpeakerName || "Student") : "Student";
+            currentStudentEntry = addTranscriptEntry(speaker, "student");
+            appendToEntry(currentStudentEntry, msg.text, { live: true, predict: true });
+          }
+        } else {
+          appendToEntry(currentStudentEntry, msg.text, { live: true, predict: true });
         }
-        appendToEntry(currentStudentEntry, msg.text, { live: true, predict: true });
       }
 
-      // Solo turn complete — clean student transcript in background (no gray/italic state)
+      // Solo turn complete
       if (msg.type === "turn_complete") {
+        lastStudentFinalizedAt = Date.now();
         const studentEntry = currentStudentEntry;
         currentStudentEntry = null;
         if (studentEntry && studentEntry.rawText.trim()) {
@@ -2188,8 +2205,9 @@ async function connect() {
         }
       }
 
-      // Classroom turn complete — clean student transcript in background (no gray/italic state)
+      // Classroom turn complete
       if (msg.type === "student_turn_complete" && msg.studentId) {
+        lastStudentFinalizedAt = Date.now();
         const studentEntry = currentStudentEntry;
         currentStudentEntry = null;
         if (studentEntry && studentEntry.rawText.trim()) {
@@ -2215,9 +2233,6 @@ async function connect() {
 
       // Audio (classroom)
       if (msg.type === "classroom_audio" && msg.base64) {
-        // #region agent log
-        fetch('http://127.0.0.1:7432/ingest/c84c3cea-d2ed-45e0-bc4d-419db123a810',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc1cf4'},body:JSON.stringify({sessionId:'fc1cf4',location:'app.js:ws.classroom_audio',message:'received classroom_audio',data:{awaitingReflection},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
-        // #endregion
         const binary = atob(msg.base64);
         const bytes = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
@@ -2253,6 +2268,11 @@ startBtn.addEventListener("click", async () => {
 stopBtn.addEventListener("click", () => {
   playButtonSound("end");
   if (ws && ws.readyState === WebSocket.OPEN) {
+    if (screenEnabled) {
+      screenEnabled = false;
+      stopScreenShare();
+      updateMediaLayout();
+    }
     awaitingReflection = true;
     stopPlayback();
     try { ws.send(JSON.stringify({ type: "request_reflection" })); } catch (_) {}
@@ -2309,9 +2329,6 @@ wbToggleBtn.addEventListener("click", () => {
   whiteboardEnabled = !whiteboardEnabled;
   if (whiteboardEnabled) {
     if (!whiteboardInited) initWhiteboard();
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      try { ws.send(JSON.stringify({ type: "whiteboard_opened" })); } catch (_) {}
-    }
   } else if (isWbFullscreenActive()) {
     setWbFullscreen(false);
   }
@@ -2329,9 +2346,6 @@ screenToggleBtn.addEventListener("click", async () => {
       updateMediaLayout(); // Show container before stream starts
       await startScreenShare();
       startFrameSending();
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        try { ws.send(JSON.stringify({ type: "screen_share_started" })); } catch (_) {}
-      }
     } catch (e) {
       screenEnabled = false;
       updateMediaLayout();

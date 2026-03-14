@@ -61,20 +61,19 @@ const STUDENT_VOICES: Record<string, string> = {
 };
 
 type SessionEntry = { role: 'teacher' | 'student'; name: string; text: string; time: number };
+const SHARED_URL_REGEX = /https?:\/\/[^\s<>"')\]]+/gi;
 
 // ── Prompt builders ──────────────────────────────────────────────────────────
 
 const GESTURE_INSTRUCTION = `
 ## Visual awareness
-You receive a live image stream from the teacher — their camera (face, gestures, paper they hold up) and/or an on-screen whiteboard they draw on. When the teacher has the camera on, you are receiving the feed and you can see them. Never say the camera is off or that you cannot see the teacher when they have the camera on. Pay close attention to what they write, draw, point at, or hold up. Occasionally — but not every turn — reference what you see naturally, the way a real student would: "Oh I can see you're pointing at that part — does that mean...?" or "So the diagram on the board shows... right?" Don't narrate everything visually. Only mention what they're showing when it's relevant to the explanation. If it's camera-only, body language matters (uncertainty, pauses). If it's whiteboard-heavy, treat it like a classroom board: read labels and follow arrows and diagrams.
+You receive a live image stream from the teacher — their camera (face, gestures, paper they hold up) and/or an on-screen whiteboard they draw on. When the teacher has the camera on, you are receiving the feed and you can see them. Never say the camera is off or that you cannot see the teacher when they have the camera on. Pay close attention to what they write, draw, point at, or hold up. Only mention visible details when they are directly relevant to the explanation. Never narrate your perception process (do not say you are analyzing/looking at images, frames, feeds, or video). If it's camera-only, body language matters (uncertainty, pauses). If it's whiteboard-heavy, treat it like a classroom board: read labels and follow arrows and diagrams.
 
 **Non-verbal cues (video):** Treat the teacher's head nods as agreement or "yes" and head shakes as disagreement or "no". These count as full responses — if you see a clear nod, respond as if they said "yes"; if you see a clear shake, respond as if they said "no". You do not need them to say the words out loud. Watch the video for these gestures every time you respond.`;
 
 const GESTURE_INSTRUCTION_VOICE_ONLY = `
 ## Senses
-This is a voice-only session. You can only hear the teacher.
-
-**Non-verbal sounds:** Treat "mhm", "mm-hmm", "uh-huh" and similar back-channel sounds as agreement or acknowledgment — the same as "yes" or "I'm following". Respond accordingly without requiring the teacher to say full sentences.`;
+This is a voice-only session. You can only hear the teacher.`;
 
 const ALLOWED_SESSION_LANGUAGES = new Set([
   'English',
@@ -116,10 +115,6 @@ function enforceTranscriptLanguage(text: string, language: string): string {
     .replace(/\s+/g, ' ')
     .trim();
 
-  // Heuristic fix for split words in Latin-script sessions, e.g. "star s" -> "stars".
-  if (['English', 'Spanish', 'French', 'German', 'Portuguese'].includes(language)) {
-    out = out.replace(/\b([A-Za-zÀ-ÖØ-öø-ÿ]{2,})\s+([A-Za-zÀ-ÖØ-öø-ÿ])\b/g, '$1$2');
-  }
   return out;
 }
 
@@ -141,6 +136,12 @@ function getClassroomInstruction(topic: string, studentIds: string[], materials:
 
   return `You are playing ${studentIds.length} students in a live classroom session. The human is the teacher explaining "${topic}".
 
+## CRITICAL RULES (never violate)
+1. NEVER use stage directions, brackets, or narrate inner states (e.g. "[listens intently]", "[nods]", "[thinking]", "[analyzing image]"). Only speak actual words out loud.
+2. NEVER speak unless the teacher has said something new. If the teacher is silent, stay silent.
+3. NEVER hallucinate or invent teacher messages. If the teacher did not say something, do not pretend they did.
+4. NEVER say you are "analyzing", "looking at", or "examining" any image, video, feed, or file.
+
 ## The students
 ${studentList}
 
@@ -149,6 +150,7 @@ ${materialsSection}
 
 ## Live in-class materials
 The teacher may share files during the lesson (handouts, images, slides). When you receive a message that the teacher has shared a study material file, look at it immediately and treat it as live class material: reference it in your questions, ask for clarification about it, or connect it to what the teacher is saying. Treat dropped-in files as "in-class work" or handouts just shared with the class.
+If a shared file/link seems unrelated, unclear, or contradictory to the current topic, do not force a connection. Acknowledge uncertainty briefly and ask how the teacher wants to use it.
 
 ## Senses
 ${video ? GESTURE_INSTRUCTION.trim() : GESTURE_INSTRUCTION_VOICE_ONLY.trim()}
@@ -169,10 +171,12 @@ Never skip this prefix — the interface depends on it to show who is speaking.
 - Students are aware of each other and can build on, disagree with, or react to what others said.
 - Keep it realistic: not every student responds every turn.
 - Students direct questions at the teacher. One question per turn, maximum.
-- Sound like real people: use "wait", "hold on", "so basically", "hmm". Treat teacher "mhm" / "mm-hmm" as agreement. Have genuine reactions.
+- Sound like real people and have genuine reactions.
+- Never use stage directions or bracketed actions (e.g. "[listens intently]" or "[nods]"). Speak only the actual words the student says aloud.
+- Do not hallucinate teacher messages, agreement, or follow-up prompts. If the teacher has not provided new information, stay quiet.
 - Never explain the topic yourself. Never be sycophantic.
 
-**If the teacher interrupts:** If the teacher speaks while a student is talking, that student **stops immediately.** Listen to the teacher's full point. When resuming, start with a brief acknowledgment ("Oh, I see," "Got it, let me adjust") and incorporate their feedback into the next thought.
+**If the teacher interrupts:** If the teacher speaks while a student is talking, that student **stops immediately.** Listen to the teacher's full point, then continue with the adjusted thought.
 
 ## Starting the session
 One student must greet the teacher out loud as the very first response (e.g. "Hi, we're ready when you are"). Do not say you cannot see or hear the teacher—greet them and indicate the class is ready.`;
@@ -193,6 +197,12 @@ function getStudentInstruction(topic: string, persona: string, materials: string
 
   return `You are a student in a "learn by teaching" session. The human is your teacher. They are going to explain "${topic}" to you.
 
+## CRITICAL RULES (never violate)
+1. NEVER use stage directions, brackets, or narrate inner states (e.g. "[listens intently]", "[nods]", "[thinking]", "[analyzing image]"). Only speak actual words out loud.
+2. NEVER speak unless the teacher has said something new. If the teacher is silent, stay silent.
+3. NEVER hallucinate or invent teacher messages. If the teacher did not say something, do not pretend they did.
+4. NEVER say you are "analyzing", "looking at", or "examining" any image, video, feed, or file.
+
 ## Your persona
 ${personaTrait}
 
@@ -201,18 +211,20 @@ ${materialsSection}
 
 ## Live in-class materials
 The teacher may share files during the lesson (handouts, images, slides). When you receive a message that the teacher has shared a study material file, look at it immediately and treat it as live class material for discussion: reference it in your questions or ask for clarification. Treat dropped-in files as "in-class work" or handouts just shared with you.
+If a shared file/link seems unrelated, unclear, or contradictory to the current topic, do not force a connection. Briefly flag the mismatch and ask what part to focus on.
 
 ## How to behave like a real student
 
 You are NOT a blank slate. You come in with partial knowledge, possible misconceptions, and specific gaps. This is crucial — a real student has encountered ideas before; they just don't fully understand them yet.
 
 **Sound like a real person:**
-- Use natural, conversational speech: "wait", "so basically", "hold on", "oh okay", "hmm"
-- Treat "mhm", "mm-hmm", "uh-huh" as agreement or acknowledgment — same as "yes" or "I'm following". Respond accordingly.
+- Use natural, conversational speech.
+- Never use stage directions or bracketed actions (e.g. "[listens intently]" or "[nods]"). Speak only what you say aloud.
 - Vary your reactions — don't ask a question every single turn. Sometimes just react ("okay that actually makes sense") and let the teacher continue.
 - Show specific confusion: not "I don't understand" but "I'm following you up until the part about X — what happens there?"
 - Have genuine "aha!" moments: "Oh — so that's WHY it works like that. I was thinking it was just..."
 - Make wrong connections and let the teacher correct you: "Is this kind of like how [wrong analogy]?"
+- Do not invent teacher responses or pretend the teacher said something they did not.
 
 **Ask good questions:**
 - One question per turn, maximum. Pick the most important thing you don't understand.
@@ -226,7 +238,7 @@ You are NOT a blank slate. You come in with partial knowledge, possible misconce
 - Don't be sycophantic. "Great explanation!" is not something a real student says — they just nod and ask the next question.
 - Stay on topic. If you drift, the teacher will redirect you.
 
-**If the teacher interrupts you:** If the teacher speaks while you are talking, **stop immediately.** Listen to their full point. When you resume, start with a brief acknowledgment like "Oh, I see," or "Got it, let me adjust," and incorporate their feedback directly into your next thought.
+**If the teacher interrupts you:** If the teacher speaks while you are talking, **stop immediately.** Listen to their full point, then incorporate their feedback directly into your next thought.
 
 ${video ? GESTURE_INSTRUCTION.trim() : GESTURE_INSTRUCTION_VOICE_ONLY.trim()}
 
@@ -254,6 +266,12 @@ function getClassroomStudentInstruction(topic: string, studentId: string, allStu
 
   return `You are ${name}, a student in a live classroom session. The human is the teacher explaining "${topic}".
 
+## CRITICAL RULES (never violate)
+1. NEVER use stage directions, brackets, or narrate inner states (e.g. "[listens intently]", "[nods]", "[thinking]", "[analyzing image]"). Only speak actual words out loud.
+2. NEVER speak unless the teacher has said something new. If the teacher is silent, stay silent.
+3. NEVER hallucinate or invent teacher messages. If the teacher did not say something, do not pretend they did.
+4. NEVER say you are "analyzing", "looking at", or "examining" any image, video, feed, or file.
+
 ## Your persona
 ${profile}
 
@@ -279,16 +297,18 @@ ${materialsSection}
 
 ## Live in-class materials
 The teacher may share files during the lesson. When you receive a message that the teacher has shared a study material file, look at it immediately and treat it as live class material: reference it in your questions or connect it to what the teacher is saying. Treat dropped-in files as "in-class work" or handouts just shared with the class.
+If a shared file/link seems unrelated, unclear, or contradictory to the current topic, do not force a connection. Briefly flag the mismatch and ask what part to focus on.
 
 ## How to behave
 
 **Sound like a real person:**
-- Use natural speech: "wait", "so basically", "hold on", "oh okay", "hmm"
-- Treat "mhm", "mm-hmm", "uh-huh" as agreement or acknowledgment — respond accordingly.
+- Use natural speech.
+- Never use stage directions or bracketed actions (e.g. "[listens intently]" or "[nods]"). Speak only what you say aloud.
 - Vary your reactions — sometimes just react and stay quiet, sometimes jump in. Not every turn requires a question.
 - Show specific confusion: not "I don't understand" but "I'm following you until the part about X"
 - Have genuine "aha!" moments
 - Make wrong connections and let the teacher correct you
+- Do not invent teacher responses or pretend the teacher said something they did not.
 
 **Questions:**
 - One question per turn, maximum. Pick the most pressing thing.
@@ -299,7 +319,7 @@ The teacher may share files during the lesson. When you receive a message that t
 - Don't be sycophantic.
 - Stay on topic.
 
-**If the teacher interrupts you:** If the teacher speaks while you are talking, **stop immediately.** Listen to their full point. When you resume, start with a brief acknowledgment like "Oh, I see," or "Got it, let me adjust," and incorporate their feedback directly into your next thought.
+**If the teacher interrupts you:** If the teacher speaks while you are talking, **stop immediately.** Listen to their full point, then incorporate their feedback directly into your next thought.
 
 ${video ? GESTURE_INSTRUCTION.trim() : GESTURE_INSTRUCTION_VOICE_ONLY.trim()}
 
@@ -462,6 +482,100 @@ async function generateReflection(
 async function main() {
   const ai = new GoogleGenAI({ vertexai: false, apiKey: GOOGLE_API_KEY });
 
+  function isImageLikeFile(mimeType: string, filename: string): boolean {
+    const lower = filename.toLowerCase();
+    if (mimeType.startsWith('image/')) return true;
+    return lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png') || lower.endsWith('.gif') || lower.endsWith('.webp');
+  }
+
+  async function extractImageTextWithAi(buf: Buffer, mimeType: string): Promise<string> {
+    if (buf.length >= 4 * 1024 * 1024) return '';
+    try {
+      const b64 = buf.toString('base64');
+      const imageMime = mimeType || 'image/jpeg';
+      const gen = await ai.models.generateContent({
+        model: FAST_MODEL,
+        contents: [{
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType: imageMime, data: b64 } },
+            {
+              text:
+                'Transcribe every readable word in this image (slides, handwriting, diagrams with labels). ' +
+                'Output plain text only, preserve line breaks where helpful. If no text, say [no text].',
+            },
+          ],
+        }],
+      });
+      const text = (gen.text || '').trim();
+      if (!text || text === '[no text]') return '';
+      return text;
+    } catch {
+      return '';
+    }
+  }
+
+  async function extractMaterialTextWithFallback(name: string, base64: string, mimeType: string, maxChars: number): Promise<{ content: string; error?: string }> {
+    const buf = Buffer.from(base64, 'base64');
+    let { text, error } = await extractFromBuffer(buf, mimeType, name);
+    if (!text.trim() && isImageLikeFile(mimeType, name)) {
+      const ocrText = await extractImageTextWithAi(buf, mimeType || 'image/jpeg');
+      if (ocrText.trim()) {
+        text = ocrText;
+        error = undefined;
+      }
+    }
+    const trimmed = text.trim();
+    if (!trimmed) return { content: '', error };
+    const content = trimmed.slice(0, maxChars) + (trimmed.length > maxChars ? '\n\n[… truncated …]' : '');
+    return { content };
+  }
+
+  function extractSharedUrls(text: string): string[] {
+    if (!text) return [];
+    const matches = text.match(SHARED_URL_REGEX) || [];
+    const unique = Array.from(new Set(matches.map(u => u.trim())));
+    return unique.slice(0, 2);
+  }
+
+  function htmlToReadableText(html: string): string {
+    return html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&#39;/gi, "'")
+      .replace(/&quot;/gi, '"')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  async function fetchUrlContextNote(url: string): Promise<string | null> {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(url, {
+        method: 'GET',
+        redirect: 'follow',
+        signal: controller.signal,
+        headers: { 'User-Agent': 'Dasko/1.0 (session-link-reader)' },
+      });
+      clearTimeout(timeout);
+      if (!res.ok) return null;
+      const contentType = (res.headers.get('content-type') || '').toLowerCase();
+      if (!contentType.includes('text/html') && !contentType.includes('text/plain')) return null;
+      const raw = await res.text();
+      const plain = htmlToReadableText(raw).slice(0, 6000);
+      if (!plain) return null;
+      return `[The teacher shared a link: ${url}]\nPage context:\n${plain}`;
+    } catch {
+      return null;
+    }
+  }
+
   const app = new Hono();
   app.use('/*', cors());
 
@@ -607,48 +721,46 @@ async function main() {
   app.post('/api/cleanup-transcript', async (c) => {
     let text = '';
     let fallback = '';
+    let language = 'English';
     try {
       const body = await c.req.json<{ text: string; topic: string; language?: string; mode?: 'live' | 'final'; speaker?: string; context?: string }>();
       fallback = body?.text || '';
       text = (body?.text || '').trim();
       const topic = body?.topic || '';
-      const language = normalizeSessionLanguage(body?.language || 'English');
+      language = normalizeSessionLanguage(body?.language || 'English');
       const mode = body?.mode === 'live' ? 'live' : 'final';
       const speaker = (body?.speaker || 'Speaker').trim() || 'Speaker';
       const context = (body?.context || '').trim().slice(0, 2000);
       if (!text) return c.json({ cleaned: body?.text || '' });
+      const cleanupPrompt =
+        `Raw speech-to-text (may have missing spaces, merged words, or wrong words). Topic: "${topic}". Language: "${language}".\n\n` +
+        `Task: produce a single readable transcript that matches what ${speaker} likely said.\n` +
+        `- Insert spaces between words where ASR merged them (e.g. "thewater" → "the water").\n` +
+        `- Fix homophones and technical terms using topic context and ${language} spelling conventions.\n` +
+        `- Use prior conversation context to disambiguate words, names, and phrasing.\n` +
+        `- Keep the same order and meaning; do not summarize or add ideas.\n` +
+        (mode === 'live'
+          ? `- This is a live partial stream. Make spacing and grammar readable immediately, but preserve unfinished wording.\n`
+          : `- This is a final transcript. Use complete punctuation and capitalization.\n`) +
+        `- Output plain text only, no quotes or markdown.\n\n` +
+        (context ? `Prior conversation:\n${context}\n\n` : '') +
+        `Transcription:\n${text}`;
+      const chosenModel = mode === 'live' ? FAST_MODEL : CLEANUP_MODEL;
       let result;
       try {
         result = await ai.models.generateContent({
-          model: CLEANUP_MODEL,
-        contents: [{
-          role: 'user',
-          parts: [{ text:
-            `Raw speech-to-text (may have missing spaces, merged words, or wrong words). Topic: "${topic}". Language: "${language}".\n\n` +
-            `Task: produce a single readable transcript that matches what ${speaker} likely said.\n` +
-            `- Insert spaces between words where ASR merged them (e.g. "thewater" → "the water").\n` +
-            `- Fix homophones and technical terms using topic context and ${language} spelling conventions.\n` +
-            `- Use prior conversation context to disambiguate words, names, and phrasing.\n` +
-            `- Keep the same order and meaning; do not summarize or add ideas.\n` +
-            (mode === 'live'
-              ? `- This is a live partial stream. Make spacing and grammar readable immediately, but preserve unfinished wording.\n`
-              : `- This is a final transcript. Use complete punctuation and capitalization.\n`) +
-            `- Output plain text only, no quotes or markdown.\n\n` +
-            (context ? `Prior conversation:\n${context}\n\n` : '') +
-            `Transcription:\n${text}`
-          }]
-        }],
+          model: chosenModel,
+          contents: [{ role: 'user', parts: [{ text: cleanupPrompt }] }],
         });
       } catch {
-        result = await ai.models.generateContent({
-          model: FAST_MODEL,
-          contents: [{
-            role: 'user',
-            parts: [{ text:
-              `Fix this speech transcript for topic "${topic}" in ${language}. Speaker: ${speaker}. Insert missing spaces and obvious word errors, using this context when helpful:\n${context || '(no prior context)'}\n\nKeep original meaning. Plain text only.\n\n${text}`
-            }]
-          }],
-        });
+        if (chosenModel !== FAST_MODEL) {
+          result = await ai.models.generateContent({
+            model: FAST_MODEL,
+            contents: [{ role: 'user', parts: [{ text: cleanupPrompt }] }],
+          });
+        } else {
+          throw new Error('Cleanup failed');
+        }
       }
       const cleanedRaw = (result.text?.trim() || text).replace(/\s+/g, ' ').trim();
       const cleaned = enforceTranscriptLanguage(cleanedRaw, language);
@@ -702,7 +814,7 @@ async function main() {
     // Deferred session start: client sends material_file(s) then ready_to_start; we merge file content into materials before creating Live session.
     const pendingMaterialFiles: { name: string; base64: string; mimeType: string }[] = [];
     let sessionReady = false;
-    const MAX_MATERIALS_CHARS = 80_000;
+    const MAX_MATERIALS_CHARS = 30_000;
 
     function sendJson(data: object) {
       if (socket.readyState === WebSocket.OPEN) {
@@ -712,10 +824,8 @@ async function main() {
 
     /** Process material_file: extract text server-side and send as text only (no raw PDF/media) to avoid Live API "invalid argument" crash. */
     async function processMaterialFile(name: string, base64: string, mimeType: string): Promise<string> {
-      const buf = Buffer.from(base64, 'base64');
-      const { text, error } = await extractFromBuffer(buf, mimeType, name);
-      const maxChars = 25_000; // single realtime message size safety
-      const content = text.trim().slice(0, maxChars) + (text.trim().length > maxChars ? '\n\n[… truncated …]' : '');
+      const maxChars = 12_000; // keep realtime input lightweight for stability
+      const { content, error } = await extractMaterialTextWithFallback(name, base64, mimeType, maxChars);
       if (content) {
         return `[The teacher has shared a study material: "${name}".]\n\nContent:\n${content}`;
       }
@@ -756,7 +866,7 @@ async function main() {
     const SPEAKER_GAP_MS = 500;
     let studentsAllowed = true;
     let consecutiveStudentTurns = 0;
-    const MAX_STUDENT_EXCHANGES = 2;
+    const MAX_STUDENT_EXCHANGES = 1;
     const audioBuffers = new Map<string, string[]>(studentIds.map(id => [id, []]));
     const MAX_BUFFER_CHUNKS = 25;
     function clearAllBuffers() {
@@ -769,10 +879,9 @@ async function main() {
       let fullMaterials = materials;
       for (const f of pendingMaterialFiles) {
         try {
-          const buf = Buffer.from(f.base64, 'base64');
-          const { text } = await extractFromBuffer(buf, f.mimeType, f.name);
-          if (text && text.trim()) {
-            const chunk = text.trim().slice(0, MAX_MATERIALS_CHARS);
+          const { content } = await extractMaterialTextWithFallback(f.name, f.base64, f.mimeType, MAX_MATERIALS_CHARS);
+          if (content) {
+            const chunk = content.slice(0, MAX_MATERIALS_CHARS);
             fullMaterials += '\n\n---\n[From file: ' + f.name + ']\n' + chunk;
           }
         } catch (_) {}
@@ -1044,25 +1153,21 @@ async function main() {
             return;
           }
           if (parsed.type === 'text_input' && typeof parsed.text === 'string' && parsed.text.trim()) {
-            sessionMap.forEach(sess => { try { sess.sendRealtimeInput({ text: parsed.text.trim() }); } catch (_) {} });
+            const userText = parsed.text.trim();
+            sessionMap.forEach(sess => { try { sess.sendRealtimeInput({ text: userText }); } catch (_) {} });
+            const urls = extractSharedUrls(userText);
+            if (urls.length) {
+              (async () => {
+                for (const url of urls) {
+                  const note = await fetchUrlContextNote(url);
+                  if (!note) continue;
+                  sessionMap!.forEach(sess => { try { sess.sendRealtimeInput({ text: note }); } catch (_) {} });
+                }
+              })();
+            }
           }
           if (parsed.type === 'video_frame' && typeof parsed.base64 === 'string') {
             sessionMap.forEach(sess => { try { sess.sendRealtimeInput({ media: { data: parsed.base64, mimeType: 'image/jpeg' } }); } catch (_) {} });
-          }
-          if (parsed.type === 'screen_share_started') {
-            sessionMap.forEach(sess => {
-              try { sess.sendRealtimeInput({ text: '[The teacher is now sharing their screen. Pay attention to what they show on screen.]' }); } catch (_) {}
-            });
-          }
-          if (parsed.type === 'camera_feed_started') {
-            sessionMap.forEach(sess => {
-              try { sess.sendRealtimeInput({ text: '[You are receiving the teacher\'s live camera feed. You can see them.]' }); } catch (_) {}
-            });
-          }
-          if (parsed.type === 'whiteboard_opened') {
-            sessionMap.forEach(sess => {
-              try { sess.sendRealtimeInput({ text: '[The teacher has the whiteboard open. You can see it; it may be blank or have content.]' }); } catch (_) {}
-            });
           }
           if (parsed.type === 'material_file' && parsed.base64 && parsed.name) {
             const name = parsed.name || 'file';
@@ -1105,19 +1210,21 @@ async function main() {
             return;
           }
           if (msg.type === 'text_input' && typeof msg.text === 'string' && msg.text.trim()) {
-            try { session.sendRealtimeInput({ text: msg.text.trim() }); } catch (_) {}
+            const userText = msg.text.trim();
+            try { session.sendRealtimeInput({ text: userText }); } catch (_) {}
+            const urls = extractSharedUrls(userText);
+            if (urls.length) {
+              (async () => {
+                for (const url of urls) {
+                  const note = await fetchUrlContextNote(url);
+                  if (!note) continue;
+                  try { session!.sendRealtimeInput({ text: note }); } catch (_) {}
+                }
+              })();
+            }
           }
           if (msg.type === 'video_frame' && typeof msg.base64 === 'string') {
             try { session.sendRealtimeInput({ media: { data: msg.base64, mimeType: 'image/jpeg' } }); } catch (_) {}
-          }
-          if (msg.type === 'screen_share_started') {
-            try { session.sendRealtimeInput({ text: '[The teacher is now sharing their screen. Pay attention to what they show on screen.]' }); } catch (_) {}
-          }
-          if (msg.type === 'camera_feed_started') {
-            try { session.sendRealtimeInput({ text: '[You are receiving the teacher\'s live camera feed. You can see them.]' }); } catch (_) {}
-          }
-          if (msg.type === 'whiteboard_opened') {
-            try { session.sendRealtimeInput({ text: '[The teacher has the whiteboard open. You can see it; it may be blank or have content.]' }); } catch (_) {}
           }
           if (msg.type === 'material_file' && msg.base64 && msg.name) {
             const name = msg.name || 'file';

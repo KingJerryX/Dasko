@@ -722,6 +722,12 @@
     .toolbar-btn.danger { background: #FEF2F2; color: #DC2626; }
     .toolbar-btn.danger:hover { background: #FEE2E2; }
     .toolbar-btn .icon { font-size: 1rem; line-height: 1; }
+    .toolbar-note {
+      font-size: 0.66rem;
+      color: #6B7280;
+      white-space: nowrap;
+      margin-left: 0.15rem;
+    }
     .toolbar-spacer { flex: 1; }
 
     /* Toast (in-session file shared) */
@@ -771,7 +777,7 @@
     /* ── SETUP CLASSROOM LOADING ──────────────────── */
     #setup-classroom-loading {
       display: none; position: fixed; inset: 0; z-index: 150;
-      background: rgba(255,255,255,0.95); flex-direction: column; align-items: center; justify-content: center;
+      background: #fff; flex-direction: column; align-items: center; justify-content: center;
       gap: 1.5rem;
     }
     #setup-classroom-loading.visible { display: flex; }
@@ -1221,6 +1227,9 @@
         <button class="toolbar-btn" id="wbToggleBtn" type="button"><span class="icon">&#x270F;&#xFE0F;</span> Board</button>
         <button class="toolbar-btn" id="screenToggleBtn" type="button"><span class="icon">&#x1F5A5;</span> Share</button>
         <button class="toolbar-btn" id="uploadMaterialBtn" type="button"><span class="icon">&#x1F4CE;</span> Upload Material</button>
+        <span class="toolbar-note" id="uploadMaterialHint" title="Allowed: PDF, JPG/JPEG, PNG, GIF, WEBP, TXT, MD, CSV. You can also paste a URL in chat and the student will read it.">
+          PDF/JPG/PNG/TXT/MD/CSV • links via chat supported
+        </span>
         <div class="toolbar-spacer"></div>
         <button class="toolbar-btn danger" id="stopBtn" type="button"><span class="icon">&#x23F9;&#xFE0F;</span> End session</button>
       </div>
