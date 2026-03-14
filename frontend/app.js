@@ -176,7 +176,9 @@ let currentTeacherEntry = null;
 let currentStudentEntry = null;
 const liveCleanupTimers = new Map();
 const liveCleanupInFlight = new Map();
-const LIVE_CLEANUP_DEBOUNCE_MS = 450;
+const LIVE_CLEANUP_DEBOUNCE_MS = 250;
+const transcriptContextHistory = [];
+const MAX_TRANSCRIPT_CONTEXT_ITEMS = 10;
 
 // Session state
 let sessionTopic     = "";
@@ -763,7 +765,24 @@ function addTranscriptEntry(speaker, type) {
   transcriptBody.appendChild(div);
   transcriptBody.scrollTop = transcriptBody.scrollHeight;
 
-  return { id, el: div, textEl: txt, rawText: "" };
+  return { id, el: div, textEl: txt, rawText: "", speaker, type };
+}
+
+function rememberTranscriptContext(speaker, text) {
+  const clean = (text || "").replace(/\s+/g, " ").trim();
+  if (!clean) return;
+  transcriptContextHistory.push({ speaker: speaker || "Speaker", text: clean });
+  if (transcriptContextHistory.length > MAX_TRANSCRIPT_CONTEXT_ITEMS) {
+    transcriptContextHistory.splice(0, transcriptContextHistory.length - MAX_TRANSCRIPT_CONTEXT_ITEMS);
+  }
+}
+
+function buildTranscriptContext(currentEntry) {
+  const items = transcriptContextHistory.slice(-6).map(item => `${item.speaker}: ${item.text}`);
+  if (currentEntry && currentEntry.speaker && currentEntry.rawText) {
+    items.push(`${currentEntry.speaker}: ${currentEntry.rawText.replace(/\s+/g, " ").trim()}`);
+  }
+  return items.join("\n");
 }
 
 function appendToEntry(entry, chunk, options) {
@@ -802,12 +821,18 @@ async function refineLiveTranscript(entry) {
         topic: sessionTopic,
         language: sessionLanguage,
         mode: "live",
+        speaker: entry.speaker || "Speaker",
+        context: buildTranscriptContext(),
       }),
     });
     const { cleaned } = await res.json();
     if (!cleaned || !cleaned.trim()) return;
-    // Do not clobber if new chunks arrived while we were refining.
+    // If newer chunks arrived, preserve the newer suffix while applying corrected prefix.
     if (entry.rawText !== sourceText) {
+      const latest = entry.rawText;
+      const suffix = latest.startsWith(sourceText) ? latest.slice(sourceText.length) : "";
+      entry.rawText = `${cleaned}${suffix}`;
+      entry.textEl.textContent = entry.rawText;
       scheduleLiveCleanup(entry);
       return;
     }
@@ -837,6 +862,8 @@ async function cleanupEntry(entry, showCleaningState = true) {
         topic: sessionTopic,
         language: sessionLanguage,
         mode: "final",
+        speaker: entry.speaker || "Speaker",
+        context: buildTranscriptContext(entry),
         materials: (sessionMaterials || "").substring(0, 2000),
       }),
     });
@@ -844,8 +871,10 @@ async function cleanupEntry(entry, showCleaningState = true) {
     const text = (cleaned && cleaned.trim()) ? cleaned : entry.rawText;
     entry.rawText = text;
     entry.textEl.textContent = text;
+    rememberTranscriptContext(entry.speaker, text);
   } catch (_) {
     entry.textEl.textContent = entry.rawText;
+    rememberTranscriptContext(entry.speaker, entry.rawText);
   } finally {
     entry.textEl.classList.remove("cleaning");
   }
@@ -1728,6 +1757,7 @@ function showSession(topic) {
   transcriptEntryId = 0;
   currentTeacherEntry = null;
   currentStudentEntry = null;
+  transcriptContextHistory.length = 0;
   liveCleanupTimers.forEach((timer) => clearTimeout(timer));
   liveCleanupTimers.clear();
   liveCleanupInFlight.clear();
@@ -2321,6 +2351,7 @@ function sendChatMessage() {
   const entry = addTranscriptEntry("You (typed)", "teacher");
   entry.rawText = text;
   entry.textEl.textContent = text;
+  rememberTranscriptContext(entry.speaker, text);
   chatInput.value = "";
   setOrbState("thinking");
 }

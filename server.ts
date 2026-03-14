@@ -608,12 +608,14 @@ async function main() {
     let text = '';
     let fallback = '';
     try {
-      const body = await c.req.json<{ text: string; topic: string; language?: string; mode?: 'live' | 'final' }>();
+      const body = await c.req.json<{ text: string; topic: string; language?: string; mode?: 'live' | 'final'; speaker?: string; context?: string }>();
       fallback = body?.text || '';
       text = (body?.text || '').trim();
       const topic = body?.topic || '';
       const language = normalizeSessionLanguage(body?.language || 'English');
       const mode = body?.mode === 'live' ? 'live' : 'final';
+      const speaker = (body?.speaker || 'Speaker').trim() || 'Speaker';
+      const context = (body?.context || '').trim().slice(0, 2000);
       if (!text) return c.json({ cleaned: body?.text || '' });
       let result;
       try {
@@ -623,14 +625,16 @@ async function main() {
           role: 'user',
           parts: [{ text:
             `Raw speech-to-text (may have missing spaces, merged words, or wrong words). Topic: "${topic}". Language: "${language}".\n\n` +
-            `Task: produce a single readable transcript that matches what a human likely said.\n` +
+            `Task: produce a single readable transcript that matches what ${speaker} likely said.\n` +
             `- Insert spaces between words where ASR merged them (e.g. "thewater" → "the water").\n` +
             `- Fix homophones and technical terms using topic context and ${language} spelling conventions.\n` +
+            `- Use prior conversation context to disambiguate words, names, and phrasing.\n` +
             `- Keep the same order and meaning; do not summarize or add ideas.\n` +
             (mode === 'live'
-              ? `- This is a live partial stream. Keep punctuation light and preserve unfinished wording.\n`
+              ? `- This is a live partial stream. Make spacing and grammar readable immediately, but preserve unfinished wording.\n`
               : `- This is a final transcript. Use complete punctuation and capitalization.\n`) +
             `- Output plain text only, no quotes or markdown.\n\n` +
+            (context ? `Prior conversation:\n${context}\n\n` : '') +
             `Transcription:\n${text}`
           }]
         }],
@@ -641,7 +645,7 @@ async function main() {
           contents: [{
             role: 'user',
             parts: [{ text:
-              `Fix this speech transcript for topic "${topic}" in ${language}. Insert missing spaces and obvious word errors. Keep original meaning. Plain text only.\n\n${text}`
+              `Fix this speech transcript for topic "${topic}" in ${language}. Speaker: ${speaker}. Insert missing spaces and obvious word errors, using this context when helpful:\n${context || '(no prior context)'}\n\nKeep original meaning. Plain text only.\n\n${text}`
             }]
           }],
         });
