@@ -92,21 +92,6 @@ function normalizeSessionLanguage(raw: string | null): string {
   return ALLOWED_SESSION_LANGUAGES.has(value) ? value : 'English';
 }
 
-const SESSION_LANGUAGE_TO_BCP47: Record<string, string> = {
-  'English': 'en-US',
-  'Spanish': 'es-ES',
-  'French': 'fr-FR',
-  'German': 'de-DE',
-  'Portuguese': 'pt-BR',
-  'Hindi': 'hi-IN',
-  'Arabic': 'ar-SA',
-  'Mandarin Chinese': 'zh-CN',
-};
-
-function getTranscriptionLanguageCode(language: string): string {
-  return SESSION_LANGUAGE_TO_BCP47[language] || 'en-US';
-}
-
 function isAllowedCharForLanguage(ch: string, language: string): boolean {
   // Whitespace and common punctuation/symbols
   if (/\s/u.test(ch) || /\p{Script=Common}/u.test(ch) || /\p{Script=Inherited}/u.test(ch)) return true;
@@ -701,7 +686,6 @@ async function main() {
     const studentIds = (url.searchParams.get('students') || '')
       .split(',').map(s => s.trim()).filter(s => STUDENT_PROFILES[s]);
     const model      = video ? VIDEO_MODEL : AUDIO_MODEL;
-    const transcriptionLanguageCode = getTranscriptionLanguageCode(language);
 
     console.log('[Dasko] New session | topic:', topic, '| persona:', persona, '| language:', language, '| video:', video, '| classroom:', classroom, studentIds);
 
@@ -805,12 +789,10 @@ async function main() {
         const entries = await Promise.all(studentIds.map(async id => {
           let transcriptBuf = '';
           const voice = STUDENT_VOICES[id] || 'Zephyr';
-          const inputAudioTranscription = { languageCode: transcriptionLanguageCode } as any;
-          const outputAudioTranscription = { languageCode: transcriptionLanguageCode } as any;
           const cfg: types.LiveConnectConfig = {
             responseModalities: [Modality.AUDIO],
-            outputAudioTranscription,
-            inputAudioTranscription,
+            outputAudioTranscription: {},
+            inputAudioTranscription: {},
             speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
             systemInstruction: getClassroomStudentInstruction(topic, id, studentIds, fullMaterials, video, language),
           };
@@ -936,12 +918,10 @@ async function main() {
       }
     } else {
       // ── SOLO: create session with fullMaterials ─────────────────────────────
-      const inputAudioTranscription = { languageCode: transcriptionLanguageCode } as any;
-      const outputAudioTranscription = { languageCode: transcriptionLanguageCode } as any;
       const config: types.LiveConnectConfig = {
         responseModalities: [Modality.AUDIO],
-        outputAudioTranscription,
-        inputAudioTranscription,
+        outputAudioTranscription: {},
+        inputAudioTranscription: {},
         speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } } },
         systemInstruction: getStudentInstruction(topic, persona, fullMaterials, video, language),
       };
