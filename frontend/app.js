@@ -792,9 +792,6 @@ function appendToEntry(entry, chunk, options) {
   if (!entry) return;
   const live = options && options.live !== false;
   const predict = options && options.predict === true;
-  if (entry.rawText && chunk && !chunk.startsWith(" ") && !entry.rawText.endsWith(" ")) {
-    entry.rawText += " ";
-  }
   entry.rawText += chunk;
   entry.textEl.textContent = live ? entry.rawText : "\u2026";
   if (predict && live) scheduleLiveCleanup(entry);
@@ -1586,9 +1583,6 @@ async function startMic(existingStream = null) {
   micProcessor.onaudioprocess = e => {
     if (awaitingReflection) return;
     if (micMuted || !ws || ws.readyState !== WebSocket.OPEN) return;
-    // Echo suppression: don't send audio while student is speaking
-    // (mic picks up student playback from speakers, which would interrupt the student)
-    if (currentOrbState === "speaking") return;
     const input = e.inputBuffer.getChannelData(0);
     let sum = 0;
     for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
@@ -2150,13 +2144,20 @@ async function connect() {
         }
       }
 
-      // Teacher transcript: append to teacher bubble; do NOT close the student bubble.
+      // Teacher transcript: new teacher turn — close any open student entry first.
       if (msg.type === "teacher_transcript" && msg.text) {
         resetIdleTimer();
         if (!currentTeacherEntry) {
           if (Date.now() - lastTeacherFinalizedAt < STALE_CHUNK_WINDOW_MS) {
             // Stale chunk arriving after teacher turn was finalized — drop it
           } else {
+            // Close student entry if AI was still mid-response when teacher started speaking
+            if (currentStudentEntry) {
+              const entry = currentStudentEntry;
+              currentStudentEntry = null;
+              lastStudentFinalizedAt = Date.now();
+              if (entry.rawText.trim()) cleanupEntry(entry, false).catch(() => {});
+            }
             currentTeacherEntry = addTranscriptEntry("You", "teacher");
             appendToEntry(currentTeacherEntry, msg.text, { live: true, predict: true });
           }
@@ -2165,13 +2166,20 @@ async function connect() {
         }
       }
 
-      // Student transcript: append to student bubble; do NOT close the teacher bubble.
+      // Student transcript: new student turn — close any open teacher entry first.
       if (msg.type === "transcript" && msg.text) {
         if (msg.name) activeSpeakerName = STUDENTS[msg.name.toLowerCase()]?.name || msg.name;
         if (!currentStudentEntry) {
           if (Date.now() - lastStudentFinalizedAt < STALE_CHUNK_WINDOW_MS) {
             // Stale chunk arriving after student turn was finalized — drop it
           } else {
+            // Close teacher entry if it was left open (e.g. AI responded before VAD silence threshold)
+            if (currentTeacherEntry) {
+              const entry = currentTeacherEntry;
+              currentTeacherEntry = null;
+              lastTeacherFinalizedAt = Date.now();
+              if (entry.rawText.trim()) cleanupEntry(entry, false).catch(() => {});
+            }
             const speaker = classroomMode ? (activeSpeakerName || "Student") : "Student";
             currentStudentEntry = addTranscriptEntry(speaker, "student");
             appendToEntry(currentStudentEntry, msg.text, { live: true, predict: true });
