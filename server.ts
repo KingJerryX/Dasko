@@ -1046,6 +1046,10 @@ async function main() {
       }
     }
 
+    function sendDebug(level: 'info' | 'warn' | 'error', message: string) {
+      sendJson({ type: 'debug', level, message });
+    }
+
     /** Process material_file: extract text server-side and send as text only (no raw PDF/media) to avoid Live API "invalid argument" crash. */
     async function processMaterialFile(name: string, base64: string, mimeType: string): Promise<string> {
       const maxChars = 12_000; // keep realtime input lightweight for stability
@@ -1207,6 +1211,7 @@ async function main() {
             callbacks: {
               onopen:  () => {
                 console.log(`[Dasko] ${id} session opened`);
+                sendDebug('info', `Gemini session opened for ${id}`);
                 if (id === studentIds[0]) {
                   sessionStartedAt = Date.now(); // reset once — audio blackout window starts from first Live session ready
                   sendJson({ type: 'session_ready' });
@@ -1352,10 +1357,12 @@ async function main() {
               },
               onerror: (e: ErrorEvent) => {
                 console.error(`[Dasko] ${id} error:`, e.message ?? JSON.stringify(e));
+                sendDebug('error', `Gemini session error for ${id}: ${e.message ?? JSON.stringify(e)}`);
                 sendJson({ type: 'error', message: `${id} session error: ${e.message ?? 'unknown'}` });
               },
               onclose: (e: CloseEvent) => {
                 console.log(`[Dasko] ${id} closed:`, e.code, e.reason || '');
+                sendDebug('error', `Gemini session closed for ${id}: code ${e.code}${e.reason ? ', reason: ' + e.reason : ''}`);
                 sendJson({ type: 'error', message: `${id} session ended (code ${e.code}${e.reason ? ': ' + e.reason : ''})` });
                 // Give the error message time to reach the client before closing
                 setTimeout(() => { if (socket.readyState === WebSocket.OPEN) socket.close(); }, 500);
@@ -1370,6 +1377,7 @@ async function main() {
         sessionReady = true;
       } catch (e: any) {
         console.error('[Dasko] Failed to create classroom sessions:', e);
+        sendDebug('error', `Failed to create classroom sessions: ${e.message}`);
         sendJson({ type: 'error', message: `Failed to connect: ${e.message}` });
         // Give the error message time to reach the client before closing
         setTimeout(() => { if (socket.readyState === WebSocket.OPEN) socket.close(); }, 500);
@@ -1391,6 +1399,7 @@ async function main() {
           callbacks: {
             onopen: () => {
               console.log('[Dasko] Live session opened, topic:', topic);
+              sendDebug('info', 'Gemini Live session opened (solo)');
               sessionStartedAt = Date.now(); // reset so audio blackout window starts from Live session ready
               sendJson({ type: 'session_ready' });
               sendJson({ type: 'info', message: `Your student is ready. Start explaining: ${topic}` });
@@ -1435,10 +1444,12 @@ async function main() {
             },
             onerror: (e: ErrorEvent) => {
               console.error('[Dasko] Session error:', e.message ?? JSON.stringify(e));
+              sendDebug('error', `Gemini session error: ${e.message ?? JSON.stringify(e)}`);
               sendJson({ type: 'error', message: e.message ?? 'Session error' });
             },
             onclose: (e: CloseEvent) => {
               console.log('[Dasko] Live session closed:', e.code, e.reason || '');
+              sendDebug('error', `Gemini session closed: code ${e.code}${e.reason ? ', reason: ' + e.reason : ''}`);
               sendJson({ type: 'error', message: `Live session ended (code ${e.code}${e.reason ? ': ' + e.reason : ''})` });
               // Give the error message time to reach the client before closing
               setTimeout(() => { if (socket.readyState === WebSocket.OPEN) socket.close(); }, 500);
@@ -1448,6 +1459,7 @@ async function main() {
         sessionReady = true;
       } catch (e: any) {
         console.error('[Dasko] Failed to connect to Live API:', e);
+        sendDebug('error', `Failed to connect to Gemini Live API: ${e.message}`);
         sendJson({ type: 'error', message: `Failed to connect: ${e.message}` });
         // Give the error message time to reach the client before closing
         setTimeout(() => { if (socket.readyState === WebSocket.OPEN) socket.close(); }, 500);
@@ -1482,8 +1494,9 @@ async function main() {
       if (sessionMap) {
         if (isBinary) {
           // Anti-hallucination: discard audio in first 1.5s after Live session ready
-          if (Date.now() - sessionStartedAt < 1500) return;
+          if (Date.now() - sessionStartedAt < 1500) { sendDebug('info', `Audio discarded (blackout: ${(1500 - (Date.now() - sessionStartedAt))}ms left)`); return; }
           // Binary audio only arrives when frontend VAD detected speech — reliable teacher-speaking signal
+          if (!teacherHasSpoken) sendDebug('info', 'Teacher speech detected (first audio)');
           teacherHasSpoken = true;
           const b64 = data.toString('base64');
           studentsAllowed = true;
@@ -1617,12 +1630,14 @@ async function main() {
       if (session) {
         if (isBinary) {
           // Anti-hallucination: discard audio in first 1.5s after Live session ready
-          if (Date.now() - sessionStartedAt < 1500) return;
+          if (Date.now() - sessionStartedAt < 1500) { sendDebug('info', `Audio discarded (blackout: ${(1500 - (Date.now() - sessionStartedAt))}ms left)`); return; }
           // Binary audio only arrives when frontend VAD detected speech — reliable teacher-speaking signal
+          if (!teacherHasSpoken) sendDebug('info', 'Teacher speech detected (first audio)');
           teacherHasSpoken = true;
           const base64 = data.toString('base64');
-          try { session.sendRealtimeInput({ media: { data: base64, mimeType: 'audio/pcm;rate=16000' } }); } catch (e) {
+          try { session.sendRealtimeInput({ media: { data: base64, mimeType: 'audio/pcm;rate=16000' } }); } catch (e: any) {
             console.error('[Dasko] sendRealtimeInput failed:', e);
+            sendDebug('warn', `Failed to send audio to Gemini: ${e.message ?? e}`);
           }
           return;
         }
@@ -1733,7 +1748,7 @@ async function main() {
           }
         } catch (_) {}
       }
-    } catch (err) { console.error('[Dasko] Message handler error (connection kept alive):', err); } });
+    } catch (err: any) { console.error('[Dasko] Message handler error (connection kept alive):', err); sendDebug('error', `Server message handler error: ${err?.message ?? err}`); } });
 
     socket.on('close', () => {
       console.log('[Dasko] Client disconnected');

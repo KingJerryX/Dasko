@@ -197,6 +197,45 @@ let currentOrbState  = "idle";
 let activeSpeakerName = "";
 let awaitingReflection = false;
 
+// ── Debug event log (persists across screen transitions) ────────────────────
+const debugEvents = [];
+function debugLog(level, message) {
+  debugEvents.push({ ts: Date.now(), level, message });
+  // Cap at 200 entries
+  if (debugEvents.length > 200) debugEvents.splice(0, debugEvents.length - 200);
+}
+function renderDebugPanel() {
+  const panel = document.getElementById("debugPanel");
+  const body = document.getElementById("debugPanelBody");
+  if (!panel || !body) return;
+  const hasErrors = debugEvents.some(e => e.level === "error");
+  if (!hasErrors || debugEvents.length === 0) {
+    panel.style.display = "none";
+    return;
+  }
+  body.innerHTML = "";
+  for (const ev of debugEvents) {
+    const d = new Date(ev.ts);
+    const ts = d.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    const ms = String(d.getMilliseconds()).padStart(3, "0");
+    const line = document.createElement("div");
+    line.className = "debug-line debug-" + ev.level;
+    line.innerHTML = `<span class="debug-ts">${ts}.${ms}</span> ${escapeHtml(ev.message)}`;
+    body.appendChild(line);
+  }
+  panel.style.display = "flex";
+  body.scrollTop = body.scrollHeight;
+}
+function clearDebugPanel() {
+  const panel = document.getElementById("debugPanel");
+  if (panel) panel.style.display = "none";
+}
+function escapeHtml(s) {
+  const d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
+
 // Audio config
 const SEND_SAMPLE_RATE        = 16000;
 const RECV_SAMPLE_RATE        = 24000;
@@ -1984,6 +2023,7 @@ function showSetup() {
   landingScreen.style.display = "none";
   sessionScreen.classList.remove("classroom-mode");
   setupScreen.style.display = "block";
+  renderDebugPanel(); // show debug log if session had errors
   if (!ambientViz) ambientViz = new AmbientVisualizer("ambientCanvas");
   ambientViz.start();
   loadRecentSessions();
@@ -2174,6 +2214,7 @@ function disconnect(keepScreen = false) {
 
 async function connect() {
   lastError = null;
+  debugEvents.length = 0; // clear debug log for new session
   awaitingReflection = false;
   stopSetupHardware();
   sessionTopic = getSelectedTopic();
@@ -2212,6 +2253,7 @@ async function connect() {
   ws.binaryType = "arraybuffer";
 
   ws.onopen = async () => {
+    debugLog('info', 'WebSocket connected to server');
     setStatus("Preparing session…", "connected");
     try {
       // Send uploaded study material files first so the server can merge them into the system instruction before the session starts
@@ -2232,11 +2274,13 @@ async function connect() {
     }
   };
 
-  ws.onclose = () => {
+  ws.onclose = (ev) => {
+    debugLog('error', `WebSocket closed (code ${ev.code}${ev.reason ? ': ' + ev.reason : ''})`);
     if (!awaitingReflection) disconnect();
   };
 
   ws.onerror = () => {
+    debugLog('error', 'WebSocket connection error');
     lastError = "Connection error.";
     setStatus("Connection error", "error");
   };
@@ -2251,6 +2295,7 @@ async function connect() {
 
       // Session is ready: server has created the Live session with pre-session materials in context; start mic/camera/timer now
       if (msg.type === "session_ready") {
+        debugLog('info', 'Gemini Live session ready');
         const setupLoading = document.getElementById("setup-classroom-loading");
         if (setupLoading) { setupLoading.classList.remove("visible"); setupLoading.style.display = "none"; }
         sessionReady = true;
@@ -2277,8 +2322,10 @@ async function connect() {
       }
 
       // Status
-      if (msg.type === "info") setStatus(msg.message || "", "connected");
-      if (msg.type === "error") { lastError = msg.message; setStatus(msg.message, "error"); }
+      if (msg.type === "info") { debugLog('info', msg.message || ''); setStatus(msg.message || "", "connected"); }
+      if (msg.type === "error") { debugLog('error', msg.message || 'Unknown error'); lastError = msg.message; setStatus(msg.message, "error"); }
+      // Server-pushed debug events
+      if (msg.type === "debug") { debugLog(msg.level || 'info', msg.message || ''); }
 
 
       // Teacher transcript: new teacher turn — close any open student entry first.
