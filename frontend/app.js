@@ -284,10 +284,12 @@ let cameraFloatTop = 0;
 // Frame sending
 let frameInterval   = null;
 let lastSpeechFrameTime = 0;
+let lastSilentFrameTime = 0;
+const SILENT_FRAME_INTERVAL_MS = 8000; // send one camera frame every 8s when silent (for visual context without triggering hallucination)
 const FRAME_SPEECH_WINDOW_MS = 4000;
 const compositeCanvas = document.createElement("canvas");
-compositeCanvas.width = 640;
-compositeCanvas.height = 360;
+compositeCanvas.width = 1280;
+compositeCanvas.height = 720;
 
 // Diagram frame streaming (annotations → AI vision)
 let diagramFrameInterval = null;
@@ -1688,34 +1690,47 @@ function startFrameSending() {
     // we prevent the model from talking when the teacher is silent.
     const now = Date.now();
     const inSpeechWindow = vadInSpeech || (now - lastSpeechFrameTime < FRAME_SPEECH_WINDOW_MS);
-    if (!inSpeechWindow) return;
+    if (!inSpeechWindow) {
+      // When camera is enabled, send a low-rate "silent" frame so Gemini
+      // maintains visual awareness (e.g. teacher holding up fingers).
+      // One frame every 8s is too infrequent to trigger hallucination.
+      if (cameraEnabled && (now - lastSilentFrameTime >= SILENT_FRAME_INTERVAL_MS)) {
+        lastSilentFrameTime = now;
+        // fall through to capture & send
+      } else {
+        return;
+      }
+    }
 
+    const W = 1280, H = 720;
     const ctx = compositeCanvas.getContext("2d");
     ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, 640, 360);
+    ctx.fillRect(0, 0, W, H);
 
-    if (screenEnabled && screenFeed && screenFeed.srcObject) {
-      try { ctx.drawImage(screenFeed, 0, 0, 640, 360); } catch (_) {}
-    }
-    if (whiteboardEnabled && whiteboardCanvas.width) {
-      ctx.save();
-      ctx.globalAlpha = 0.5;
-      ctx.drawImage(whiteboardCanvas, 0, 0, 640, 360);
-      ctx.restore();
-    }
-    if (cameraEnabled && cameraPipFeed && cameraPipFeed.srcObject) {
-      try {
-        const r = 56;
-        const x = 640 - r - 16;
-        const y = 360 - r - 16;
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(x + r, y + r, r, 0, Math.PI * 2);
-        ctx.closePath();
-        ctx.clip();
-        ctx.drawImage(cameraPipFeed, x, y, r * 2, r * 2);
-        ctx.restore();
-      } catch (_) {}
+    const hasScreen = screenEnabled && screenFeed && screenFeed.srcObject;
+    const hasWhiteboard = whiteboardEnabled && whiteboardCanvas.width;
+    const hasCamera = cameraEnabled && cameraPipFeed && cameraPipFeed.srcObject;
+
+    // Collect active sources into a list for smart tiling
+    const sources = [];
+    if (hasCamera)     sources.push({ type: "camera",     el: cameraPipFeed });
+    if (hasScreen)     sources.push({ type: "screen",     el: screenFeed });
+    if (hasWhiteboard) sources.push({ type: "whiteboard", el: whiteboardCanvas });
+
+    if (sources.length === 1) {
+      // Single source — full frame
+      try { ctx.drawImage(sources[0].el, 0, 0, W, H); } catch (_) {}
+    } else if (sources.length === 2) {
+      // Two sources — side by side, each 640x720
+      try { ctx.drawImage(sources[0].el, 0, 0, W / 2, H); } catch (_) {}
+      try { ctx.drawImage(sources[1].el, W / 2, 0, W / 2, H); } catch (_) {}
+    } else if (sources.length === 3) {
+      // Three sources — camera top full width, other two bottom half each
+      const camIdx = sources.findIndex(s => s.type === "camera");
+      const cam = camIdx >= 0 ? sources.splice(camIdx, 1)[0] : sources.shift();
+      try { ctx.drawImage(cam.el, 0, 0, W, H / 2); } catch (_) {}
+      try { ctx.drawImage(sources[0].el, 0, H / 2, W / 2, H / 2); } catch (_) {}
+      try { ctx.drawImage(sources[1].el, W / 2, H / 2, W / 2, H / 2); } catch (_) {}
     }
 
     const base64 = compositeCanvas.toDataURL("image/jpeg", 0.5).split(",")[1];
@@ -2068,7 +2083,11 @@ function showLanding() {
   landingScreen.classList.remove("fade-out");
 }
 
+// Store last reflection data for PDF download
+let lastReflectionData = null;
+
 function showReflection(data) {
+  lastReflectionData = data;
   if (reflectionLoadingScreen) reflectionLoadingScreen.classList.remove("visible");
   sessionScreen.style.display = "none";
   reflectionScreen.style.display = "block";
@@ -2082,70 +2101,94 @@ function showReflection(data) {
   if (recapMode) recapMode.textContent = classroomMode ? "Classroom" : "Solo";
   if (recapDuration) recapDuration.textContent = formatTime(sessionDuration) || "0:00";
 
-  function wrapBold(s, positive) {
-    const cls = positive ? "reflection-highlight" : "reflection-highlight";
-    return s.replace(/\*\*(.*?)\*\*/g, (_, t) => `<span class="${cls}">${escapeHtml(t)}</span>`);
-  }
-  function fillList(el, items, positive) {
-    if (!el) return;
-    el.innerHTML = "";
-    (items || []).forEach(item => {
-      const li = document.createElement("li");
-      const raw = typeof item === "string" ? item : (item && item.text ? item.text : String(item));
-      li.innerHTML = wrapBold(raw, positive);
-      el.appendChild(li);
-    });
-    if (!items || items.length === 0) {
-      const li = document.createElement("li");
-      li.textContent = "No data";
-      li.style.color = "var(--dasko-text-secondary)";
-      el.appendChild(li);
-    }
+  function wrapBold(s) {
+    return s.replace(/\*\*(.*?)\*\*/g, (_, t) => `<span class="reflection-highlight">${escapeHtml(t)}</span>`);
   }
 
-  fillList(reflectionStrengths, data.strengths, true);
+  // Strengths — card-style items with icons
+  const strengthIcons = ["\u{1F60A}", "\u{1F465}", "\u{1F551}"];
+  if (reflectionStrengths) {
+    reflectionStrengths.innerHTML = "";
+    (data.strengths || []).forEach((item, i) => {
+      const raw = typeof item === "string" ? item : String(item);
+      const div = document.createElement("div");
+      div.className = "rcard-item";
+      div.innerHTML = `<span class="rcard-item-icon">${strengthIcons[i % strengthIcons.length]}</span> <span>${wrapBold(raw)}</span>`;
+      reflectionStrengths.appendChild(div);
+    });
+  }
+
+  // Gaps — card-style items with icons
+  const gapIcons = ["\u{1F504}", "\u{2757}", "\u{1F914}"];
   const gapsList = document.getElementById("reflectionGaps");
   const gapsEmpty = document.getElementById("reflectionGapsEmpty");
   if (gapsList && gapsEmpty) {
+    gapsList.innerHTML = "";
     if (!data.gaps || data.gaps.length === 0) {
-      gapsList.innerHTML = "";
       gapsEmpty.style.display = "block";
     } else {
       gapsEmpty.style.display = "none";
-      fillList(gapsList, data.gaps, false);
+      data.gaps.forEach((item, i) => {
+        const raw = typeof item === "string" ? item : String(item);
+        const div = document.createElement("div");
+        div.className = "rcard-item";
+        div.innerHTML = `<span class="rcard-item-icon">${gapIcons[i % gapIcons.length]}</span> <span>${wrapBold(raw)}</span>`;
+        gapsList.appendChild(div);
+      });
     }
   }
-  fillList(reflectionQuestions, data.topQuestions, true);
 
+  // Key Vocabulary — pill tags
+  const vocabEl = document.getElementById("reflectionVocabulary");
+  if (vocabEl) {
+    vocabEl.innerHTML = "";
+    (data.keyVocabulary || []).forEach(term => {
+      const span = document.createElement("span");
+      span.className = "rcard-vocab-tag";
+      span.textContent = typeof term === "string" ? term : String(term);
+      vocabEl.appendChild(span);
+    });
+  }
+
+  // Next steps — bullet list
   const checklistEl = document.getElementById("reflectionImprovementsChecklist");
   if (checklistEl) {
     checklistEl.innerHTML = "";
     (data.improvements || []).forEach(text => {
-      const raw = typeof text === "string" ? text : (text && text.text ? text.text : String(text));
+      const raw = typeof text === "string" ? text : String(text);
       const li = document.createElement("li");
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.id = "reflection-cb-" + Math.random().toString(36).slice(2, 8);
-      const label = document.createElement("label");
-      label.htmlFor = cb.id;
-      label.innerHTML = wrapBold(raw, true);
-      li.appendChild(cb);
-      li.appendChild(label);
+      li.innerHTML = wrapBold(raw);
       checklistEl.appendChild(li);
     });
     if (!data.improvements || data.improvements.length === 0) {
       const li = document.createElement("li");
       li.textContent = "No steps suggested.";
-      li.style.color = "var(--dasko-text-secondary)";
+      li.style.color = "#94a3b8";
       checklistEl.appendChild(li);
     }
   }
 
+  // Student questions — quote cards
+  if (reflectionQuestions) {
+    reflectionQuestions.innerHTML = "";
+    (data.topQuestions || []).forEach(q => {
+      const raw = typeof q === "string" ? q : String(q);
+      const div = document.createElement("div");
+      div.className = "rcard-question";
+      div.textContent = raw.startsWith('"') ? raw : `"${raw}"`;
+      reflectionQuestions.appendChild(div);
+    });
+  }
+
+  // Presentation skills feedback — combined text
+  const ps = data.presentationSkills || {};
+  const feedbackParts = [ps.visualsAndGestures, ps.explanations, ps.mediaUsage].filter(s => s && s.trim() && s !== "—");
+  if (reflectionVisualsGestures) {
+    reflectionVisualsGestures.textContent = feedbackParts.length > 0 ? feedbackParts.join(" ") : "No presentation feedback available.";
+  }
   const visualsEmpty = document.getElementById("reflectionVisualsEmpty");
   if (visualsEmpty) {
-    const ps = data.presentationSkills || {};
-    const noVisuals = !ps.visualsAndGestures || ps.visualsAndGestures === "—" || !ps.visualsAndGestures.trim();
-    if (noVisuals) {
+    if (feedbackParts.length === 0) {
       visualsEmpty.textContent = "Tip: Next time, try using the whiteboard to illustrate " + (sessionTopic || "your topic") + ".";
       visualsEmpty.style.display = "block";
     } else {
@@ -2153,25 +2196,16 @@ function showReflection(data) {
     }
   }
 
-  const cardIds = ["reflectionCardStrength", "reflectionCardGap", "reflectionCardQuestions", "reflectionCardImprovement", "reflectionCardPresentation"];
-  const studentIds = classroomMode ? Array.from(selectedStudents) : [];
-  cardIds.forEach((id, i) => {
-    const card = document.getElementById(id);
-    if (!card) return;
-    if (studentIds[i] && STUDENTS[studentIds[i]]) {
-      card.style.borderLeftColor = STUDENTS[studentIds[i]].color;
-    } else if (!classroomMode && !card.classList.contains("card-gap") && !card.classList.contains("card-strength") && !card.classList.contains("card-improvement")) {
-      card.style.borderLeftColor = "var(--dasko-border-solid)";
-    }
-  });
-
-  const ps = data.presentationSkills || {};
-  if (reflectionVisualsGestures) reflectionVisualsGestures.textContent = ps.visualsAndGestures || "—";
-  if (reflectionExplanations) reflectionExplanations.textContent = ps.explanations || "—";
-  if (reflectionMediaUsage) reflectionMediaUsage.textContent = ps.mediaUsage || "—";
-  if (Array.isArray(data.presentationSkills) && data.presentationSkills.length) {
-    if (reflectionVisualsGestures) reflectionVisualsGestures.textContent = data.presentationSkills[0];
-  }
+  // Presentation mechanics — 4-column ratings
+  const mech = data.presentationMechanics || {};
+  const mechClarity = document.getElementById("mechClarity");
+  const mechVisuals = document.getElementById("mechVisuals");
+  const mechPacing = document.getElementById("mechPacing");
+  const mechTools = document.getElementById("mechTools");
+  if (mechClarity) mechClarity.textContent = mech.clarity || "—";
+  if (mechVisuals) mechVisuals.textContent = mech.visuals || "—";
+  if (mechPacing) mechPacing.textContent = mech.pacing || "—";
+  if (mechTools) mechTools.textContent = mech.tools || "—";
 
   pushRecentTopic(sessionTopic);
   try {
@@ -2681,6 +2715,93 @@ changeTopicBtn.addEventListener("click", () => {
   disconnect();  // clean up ws, mic, playback before returning to setup
 });
 
+// ── PDF Download ─────────────────────────────────────────────────────────────
+const downloadSummaryBtn = document.getElementById("downloadSummaryBtn");
+if (downloadSummaryBtn) {
+  downloadSummaryBtn.addEventListener("click", () => {
+    if (!lastReflectionData) return;
+    const data = lastReflectionData;
+    const { jsPDF } = window.jspdf || {};
+    if (!jsPDF) { alert("PDF library not loaded. Please try again."); return; }
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
+    const pw = 210; // page width
+    const margin = 20;
+    const tw = pw - margin * 2; // text width
+    let y = 20;
+
+    function addText(text, size, style, color, maxW) {
+      doc.setFontSize(size);
+      doc.setFont("helvetica", style);
+      doc.setTextColor(...color);
+      const lines = doc.splitTextToSize(text, maxW || tw);
+      if (y + lines.length * size * 0.45 > 280) { doc.addPage(); y = 20; }
+      doc.text(lines, margin, y);
+      y += lines.length * size * 0.45 + 2;
+    }
+
+    function addSection(title, items, bullet) {
+      y += 4;
+      if (y > 265) { doc.addPage(); y = 20; }
+      addText(title, 13, "bold", [15, 23, 42]);
+      (items || []).forEach(item => {
+        const raw = (typeof item === "string" ? item : String(item)).replace(/\*\*/g, "");
+        addText((bullet || "\u2022") + "  " + raw, 10, "normal", [51, 65, 85]);
+      });
+    }
+
+    // Title
+    addText("Session Reflection", 22, "bold", [15, 23, 42]);
+    y += 2;
+    // Summary
+    if (data.summary) addText(data.summary, 10, "normal", [100, 116, 139]);
+    y += 4;
+    // Topic block
+    addText("Topic: " + (sessionTopic || "—"), 14, "bold", [0, 121, 107]);
+    addText((classroomMode ? "Classroom" : "Solo") + "  \u2022  " + (formatTime(sessionDuration) || "0:00") + " Session", 10, "normal", [71, 85, 105]);
+    y += 2;
+
+    // Sections
+    addSection("What Went Well", data.strengths);
+    addSection("Concepts to Revisit", data.gaps);
+
+    if (data.keyVocabulary && data.keyVocabulary.length > 0) {
+      y += 4;
+      addText("Key Vocabulary", 13, "bold", [15, 23, 42]);
+      addText(data.keyVocabulary.join("  \u2022  "), 10, "normal", [123, 31, 162]);
+    }
+
+    addSection("Next Steps", data.improvements);
+    addSection("Student Questions", data.topQuestions, "\u201C");
+
+    // Presentation feedback
+    const ps = data.presentationSkills || {};
+    const fb = [ps.visualsAndGestures, ps.explanations, ps.mediaUsage].filter(s => s && s.trim() && s !== "\u2014");
+    if (fb.length > 0) {
+      y += 4;
+      addText("Presentation Skills Feedback", 13, "bold", [15, 23, 42]);
+      addText(fb.join(" "), 10, "normal", [51, 65, 85]);
+    }
+
+    // Mechanics
+    const mech = data.presentationMechanics || {};
+    if (mech.clarity || mech.visuals || mech.pacing || mech.tools) {
+      y += 4;
+      addText("Presentation & Mechanics", 13, "bold", [15, 23, 42]);
+      addText(`Clarity: ${mech.clarity || "\u2014"}   |   Visuals: ${mech.visuals || "\u2014"}   |   Pacing: ${mech.pacing || "\u2014"}   |   Tools: ${mech.tools || "\u2014"}`, 10, "normal", [51, 65, 85]);
+    }
+
+    // Footer
+    y += 8;
+    if (y > 275) { doc.addPage(); y = 20; }
+    doc.setFontSize(8);
+    doc.setTextColor(148, 163, 184);
+    doc.text("Generated by Dasko \u2014 Learn by Teaching", margin, 285);
+
+    const filename = "Dasko-Reflection-" + (sessionTopic || "session").replace(/[^a-zA-Z0-9]/g, "-").slice(0, 40) + ".pdf";
+    doc.save(filename);
+  });
+}
+
 // ── Firebase ─────────────────────────────────────────────────────────────────
 function initFirebase() {
   if (!window.__FIREBASE_CONFIG || !window.__FIREBASE_CONFIG.apiKey) return;
@@ -2818,53 +2939,70 @@ function stopDiagramFrameSending() {
 
 function captureAndSendScreenshot() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const W = 1280, H = 720;
   const shotCanvas = document.createElement("canvas");
-  shotCanvas.width = 1280;
-  shotCanvas.height = 720;
+  shotCanvas.width = W;
+  shotCanvas.height = H;
   const ctx = shotCanvas.getContext("2d");
   ctx.fillStyle = "#fff";
-  ctx.fillRect(0, 0, 1280, 720);
+  ctx.fillRect(0, 0, W, H);
 
-  // Draw screen share (full area)
-  const screenEl = document.getElementById("screenFeed");
-  if (screenEl && screenEl.srcObject) {
-    try { ctx.drawImage(screenEl, 0, 0, 1280, 720); } catch (_) {}
-  }
-  // Draw whiteboard
-  const wbCanvas = document.getElementById("whiteboardCanvas");
-  if (wbCanvas && wbCanvas.width > 0) {
-    ctx.save();
-    ctx.globalAlpha = screenEl && screenEl.srcObject ? 0.5 : 1.0;
-    try { ctx.drawImage(wbCanvas, 0, 0, 1280, 720); } catch (_) {}
-    ctx.restore();
-  }
-  // Draw camera PiP
+  // Collect active sources
+  const sources = [];
   const camEl = document.getElementById("cameraPipFeed") || document.getElementById("cameraFeed");
-  if (camEl && camEl.srcObject) {
-    try {
-      const r = 100;
-      const x = 1280 - r * 2 - 24;
-      const y = 720 - r * 2 - 24;
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(x + r, y + r, r, 0, Math.PI * 2);
-      ctx.clip();
-      ctx.drawImage(camEl, x, y, r * 2, r * 2);
-      ctx.restore();
-    } catch (_) {}
-  }
-  // If diagram popup is open, include it
+  if (camEl && camEl.srcObject)          sources.push({ type: "camera", el: camEl });
+  const screenEl = document.getElementById("screenFeed");
+  if (screenEl && screenEl.srcObject)    sources.push({ type: "screen", el: screenEl });
+  const wbCanvas = document.getElementById("whiteboardCanvas");
+  if (wbCanvas && wbCanvas.width > 0)    sources.push({ type: "whiteboard", el: wbCanvas });
+  // Include diagram if popup is open
   const diagCanvas = document.getElementById("diagramCanvas");
   const diagPopup = document.getElementById("diagramPopup");
   if (diagPopup && diagPopup.classList.contains("visible") && diagCanvas) {
-    const dw = 480, dh = 360;
-    ctx.strokeStyle = "#E5E7EB";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(0, 720 - dh, dw, dh);
-    try { ctx.drawImage(diagCanvas, 0, 720 - dh, dw, dh); } catch (_) {}
-    ctx.font = "14px Inter, sans-serif";
-    ctx.fillStyle = "#374151";
-    ctx.fillText("Student Diagram (with annotations)", 8, 720 - dh + 16);
+    sources.push({ type: "diagram", el: diagCanvas });
+  }
+
+  // Smart tiling — every source gets maximum pixels
+  if (sources.length === 1) {
+    try { ctx.drawImage(sources[0].el, 0, 0, W, H); } catch (_) {}
+  } else if (sources.length === 2) {
+    try { ctx.drawImage(sources[0].el, 0, 0, W / 2, H); } catch (_) {}
+    try { ctx.drawImage(sources[1].el, W / 2, 0, W / 2, H); } catch (_) {}
+  } else if (sources.length === 3) {
+    const camIdx = sources.findIndex(s => s.type === "camera");
+    const cam = camIdx >= 0 ? sources.splice(camIdx, 1)[0] : sources.shift();
+    try { ctx.drawImage(cam.el, 0, 0, W, H / 2); } catch (_) {}
+    try { ctx.drawImage(sources[0].el, 0, H / 2, W / 2, H / 2); } catch (_) {}
+    try { ctx.drawImage(sources[1].el, W / 2, H / 2, W / 2, H / 2); } catch (_) {}
+  } else if (sources.length >= 4) {
+    // 2x2 grid
+    try { ctx.drawImage(sources[0].el, 0, 0, W / 2, H / 2); } catch (_) {}
+    try { ctx.drawImage(sources[1].el, W / 2, 0, W / 2, H / 2); } catch (_) {}
+    try { ctx.drawImage(sources[2].el, 0, H / 2, W / 2, H / 2); } catch (_) {}
+    try { ctx.drawImage(sources[3].el, W / 2, H / 2, W / 2, H / 2); } catch (_) {}
+  }
+
+  // Add labels so Gemini knows which source is which
+  ctx.font = "bold 16px Inter, sans-serif";
+  ctx.fillStyle = "rgba(0,0,0,0.6)";
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = 3;
+  const positions = sources.length === 1 ? [[8, 24]]
+    : sources.length === 2 ? [[8, 24], [W / 2 + 8, 24]]
+    : sources.length === 3 ? [[8, 24], [8, H / 2 + 24], [W / 2 + 8, H / 2 + 24]]
+    : [[8, 24], [W / 2 + 8, 24], [8, H / 2 + 24], [W / 2 + 8, H / 2 + 24]];
+  // Recover full sources list for labelling (we may have spliced camera out)
+  const allSources = sources.length === 1 ? sources
+    : sources; // labels are approximate — camera always first
+  // skip labels for single source
+  if (sources.length > 1) {
+    positions.forEach((pos, i) => {
+      if (i < sources.length) {
+        const label = sources[i].type.charAt(0).toUpperCase() + sources[i].type.slice(1);
+        ctx.strokeText(label, pos[0], pos[1]);
+        ctx.fillText(label, pos[0], pos[1]);
+      }
+    });
   }
 
   const base64 = shotCanvas.toDataURL("image/jpeg", 0.7).split(",")[1];

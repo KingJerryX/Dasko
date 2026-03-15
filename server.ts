@@ -485,7 +485,9 @@ async function generateReflection(
       gaps: [],
       topQuestions: [],
       improvements: ['Try a longer session — aim for at least 5 minutes of explanation.'],
+      keyVocabulary: [],
       presentationSkills: { visualsAndGestures: '', explanations: '', mediaUsage: '' },
+      presentationMechanics: { clarity: 'Fair', visuals: 'Fair', pacing: 'Steady', tools: 'Minimal' },
     };
   }
 
@@ -507,10 +509,16 @@ async function generateReflection(
           `- "gaps": string[] — 2-3 concepts that were missed, skipped, or explained unclearly (empty array if none). Wrap the key problem in **asterisks** (e.g. "**The second step** was unclear.")\n` +
           `- "topQuestions": string[] — the 3 most insightful student questions verbatim (fewer if session was short)\n` +
           `- "improvements": string[] — 2-3 concrete, actionable suggestions. Wrap the key action in **asterisks** (e.g. "**Use the whiteboard** for the diagram.")\n` +
+          `- "keyVocabulary": string[] — 4-6 key vocabulary terms or concepts that were central to this teaching session (short 1-2 word terms only, e.g. "Prime Number", "Composite", "Factors")\n` +
           `- "presentationSkills": object with exactly these three keys, each a single short sentence (or empty string if not applicable):\n` +
           `  - "visualsAndGestures": Did the teacher use the camera, hands, or whiteboard effectively to demonstrate points?\n` +
           `  - "explanations": Were the explanations concise and clear, or rambling?\n` +
-          `  - "mediaUsage": How effectively were screen sharing or shared files/materials utilized?\n\n` +
+          `  - "mediaUsage": How effectively were screen sharing or shared files/materials utilized?\n` +
+          `- "presentationMechanics": object with exactly these four keys, each a single word rating:\n` +
+          `  - "clarity": one of "Excellent", "Good", "Fair", "Needs Work" — how clear and understandable was the teacher\n` +
+          `  - "visuals": one of "Excellent", "Good", "Fair", "Needs Work" — how well were visual aids used\n` +
+          `  - "pacing": one of "Excellent", "Steady", "Fast", "Slow" — was the pacing appropriate\n` +
+          `  - "tools": one of "Seamless", "Good", "Fair", "Minimal" — how well did the teacher use available tools (whiteboard, screen share, etc.)\n\n` +
           `Keep every bullet and presentationSkills value to at most one short sentence. Be explicit and useful. Return ONLY valid JSON. No extra text.`
         }]
       }],
@@ -543,7 +551,9 @@ async function generateReflection(
       gaps: [],
       topQuestions: [],
       improvements: [],
+      keyVocabulary: [],
       presentationSkills: { visualsAndGestures: '', explanations: '', mediaUsage: '' },
+      presentationMechanics: { clarity: 'Fair', visuals: 'Fair', pacing: 'Steady', tools: 'Minimal' },
     };
   }
 }
@@ -1580,8 +1590,11 @@ async function main() {
           // Anti-hallucination: discard audio in first 1.5s after Live session ready
           if (Date.now() - sessionStartedAt < 1500) { sendDebug('info', `Audio discarded (blackout: ${(1500 - (Date.now() - sessionStartedAt))}ms left)`); return; }
           // Binary audio only arrives when frontend VAD detected speech — reliable teacher-speaking signal
+          // Also set teacherIsSpeaking here: on Cloud Run, binary frames can arrive before speech_start JSON
           if (!teacherHasSpoken) sendDebug('info', 'Teacher speech detected (first audio)');
           teacherHasSpoken = true;
+          teacherIsSpeaking = true;
+          lastTeacherSpeechAt = Date.now();
           const b64 = data.toString('base64');
           studentsAllowed = true;
           consecutiveStudentTurns = 0;
@@ -1668,11 +1681,9 @@ async function main() {
           if (parsed.type === 'video_frame' && typeof parsed.base64 === 'string') {
             // Skip regular video frames when diagram popup is open (diagram frames take priority)
             if (diagramPopupOpen) return;
-            // Only relay video frames if the teacher is speaking or recently spoke
-            const frameAge = Date.now() - lastTeacherSpeechAt;
-            if (teacherIsSpeaking || frameAge < SILENCE_FRAME_GATE_MS) {
-              sessionMap.forEach(sess => { try { sess.sendRealtimeInput({ media: { data: parsed.base64, mimeType: 'image/jpeg' } }); } catch (_) {} });
-            }
+            // Relay all video frames — the frontend already handles rate-limiting
+            // (fast during speech, slow 1-per-8s for silent camera-only visual awareness)
+            sessionMap.forEach(sess => { try { sess.sendRealtimeInput({ media: { data: parsed.base64, mimeType: 'image/jpeg' } }); } catch (_) {} });
           }
           // Diagram annotation frames — no speech gating (teacher is actively drawing)
           if (parsed.type === 'diagram_frame' && typeof parsed.base64 === 'string') {
@@ -1716,8 +1727,11 @@ async function main() {
           // Anti-hallucination: discard audio in first 1.5s after Live session ready
           if (Date.now() - sessionStartedAt < 1500) { sendDebug('info', `Audio discarded (blackout: ${(1500 - (Date.now() - sessionStartedAt))}ms left)`); return; }
           // Binary audio only arrives when frontend VAD detected speech — reliable teacher-speaking signal
+          // Also set teacherIsSpeaking here: on Cloud Run, binary frames can arrive before speech_start JSON
           if (!teacherHasSpoken) sendDebug('info', 'Teacher speech detected (first audio)');
           teacherHasSpoken = true;
+          teacherIsSpeaking = true;
+          lastTeacherSpeechAt = Date.now();
           const base64 = data.toString('base64');
           try { session.sendRealtimeInput({ media: { data: base64, mimeType: 'audio/pcm;rate=16000' } }); } catch (e: any) {
             console.error('[Dasko] sendRealtimeInput failed:', e);
@@ -1793,11 +1807,9 @@ async function main() {
           if (msg.type === 'video_frame' && typeof msg.base64 === 'string') {
             // Skip regular video frames when diagram popup is open (diagram frames take priority)
             if (diagramPopupOpen) return;
-            // Only relay video frames if the teacher is speaking or recently spoke
-            const frameAge = Date.now() - lastTeacherSpeechAt;
-            if (teacherIsSpeaking || frameAge < SILENCE_FRAME_GATE_MS) {
-              try { session.sendRealtimeInput({ media: { data: msg.base64, mimeType: 'image/jpeg' } }); } catch (_) {}
-            }
+            // Relay all video frames — the frontend already handles rate-limiting
+            // (fast during speech, slow 1-per-8s for silent camera-only visual awareness)
+            try { session.sendRealtimeInput({ media: { data: msg.base64, mimeType: 'image/jpeg' } }); } catch (_) {}
           }
           // Diagram annotation frames — no speech gating
           if (msg.type === 'diagram_frame' && typeof msg.base64 === 'string') {

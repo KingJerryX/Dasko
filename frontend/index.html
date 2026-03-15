@@ -264,15 +264,13 @@
     /* ── SESSION ──────────────────────────────────── */
     #session-screen {
       display: none; width: 100vw; height: 100vh;
-      flex-direction: column; background: var(--dasko-bg); color: #111827; overflow: hidden; position: relative;
+      flex-direction: column; background: #fff; color: #111827; overflow: hidden; position: relative;
     }
 
     /* Top bar */
     .session-top-bar {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 0.5rem 1.25rem;
-      background: rgba(255,255,255,0.6); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-      border-bottom: 1px solid var(--dasko-border);
+      padding: 0.5rem 1.25rem; background: #fff; border-bottom: 1.5px solid #E5E7EB;
       flex-shrink: 0; min-height: 44px;
     }
     .session-top-left { display: flex; align-items: center; gap: 1rem; }
@@ -334,13 +332,12 @@
     /* Panel toggle buttons on center edges */
     .panel-toggle {
       position: absolute; top: 50%; transform: translateY(-50%); z-index: 20;
-      width: 24px; height: 48px; padding: 0; border: 1px solid var(--dasko-border);
-      background: rgba(255,255,255,0.6); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-      border-radius: 6px; cursor: pointer;
+      width: 24px; height: 48px; padding: 0; border: 1.5px solid #E5E7EB;
+      background: #fff; border-radius: 6px; cursor: pointer;
       font-size: 0.75rem; color: #6B7280; display: flex; align-items: center; justify-content: center;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.04); transition: background 0.15s, color 0.15s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06); transition: background 0.15s, color 0.15s;
     }
-    .panel-toggle:hover { background: rgba(255,255,255,0.85); color: #111827; }
+    .panel-toggle:hover { background: #F9FAFB; color: #111827; }
     .panel-toggle-left  { left: 0; border-left: none; border-radius: 0 6px 6px 0; }
     .panel-toggle-right { right: 0; border-right: none; border-radius: 6px 0 0 6px; }
     .transcript-panel.collapsed + .panel-resizer { display: none; }
@@ -349,16 +346,14 @@
 
     /* Transcript panel (left) */
     .transcript-panel {
-      width: 300px; min-width: 120px; flex-shrink: 0;
-      background: rgba(255,255,255,0.5); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-      border-right: 1px solid var(--dasko-border);
+      width: 300px; min-width: 120px; flex-shrink: 0; background: #F9FAFB; border-right: 1.5px solid #E5E7EB;
       display: flex; flex-direction: column; overflow: hidden; transition: width 0.2s, min-width 0.2s;
     }
     .transcript-panel.collapsed { width: 0; min-width: 0; overflow: hidden; border-right: none; }
     .panel-header {
       padding: 0.65rem 1rem; font-size: 0.65rem; font-weight: 600;
       text-transform: uppercase; letter-spacing: 0.1em; color: #9CA3AF;
-      border-bottom: 1px solid var(--dasko-border);
+      border-bottom: 1.5px solid #E5E7EB;
     }
     .transcript-body {
       flex: 1; overflow-y: auto; padding: 0.75rem; scroll-behavior: smooth;
@@ -843,9 +838,7 @@
 
     /* Coaching panel (right) */
     .coaching-panel {
-      width: 260px; min-width: 120px; flex-shrink: 0;
-      background: rgba(255,255,255,0.5); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-      border-left: 1px solid var(--dasko-border);
+      width: 260px; min-width: 120px; flex-shrink: 0; background: #F9FAFB; border-left: 1.5px solid #E5E7EB;
       display: flex; flex-direction: column; overflow: hidden; transition: width 0.2s, min-width 0.2s;
     }
     .coaching-body { flex: 1; overflow-y: auto; padding: 0.75rem 0.85rem; display: flex; flex-direction: column; justify-content: flex-end; gap: 0.6rem; }
@@ -870,18 +863,17 @@
 
     /* Bottom bar */
     .session-bottom {
-      flex-shrink: 0; padding: 0.5rem 1rem;
-      background: rgba(255,255,255,0.6); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-      border-top: 1px solid var(--dasko-border);
+      flex-shrink: 0; padding: 0.5rem 1rem; background: #fff;
+      border-top: 1.5px solid #E5E7EB;
     }
     .session-toolbar { display: flex; align-items: center; justify-content: center; gap: 0.4rem; margin-bottom: 0.4rem; }
     .toolbar-btn {
       display: flex; align-items: center; gap: 0.35rem;
-      padding: 0.45rem 0.85rem; background: rgba(243,244,246,0.7); border: 1px solid var(--dasko-border); border-radius: 8px;
+      padding: 0.45rem 0.85rem; background: #F3F4F6; border: none; border-radius: 8px;
       color: #374151; font-family: inherit; font-size: 0.78rem; font-weight: 500;
-      cursor: pointer; transition: background 0.15s, box-shadow 0.15s; white-space: nowrap;
+      cursor: pointer; transition: background 0.15s; white-space: nowrap;
     }
-    .toolbar-btn:hover { background: rgba(229,231,235,0.8); }
+    .toolbar-btn:hover { background: #E5E7EB; }
     .toolbar-btn.active { background: #FF7355; color: #fff; }
     .toolbar-btn.muted  { background: #dc2626; color: #fff; }
     .toolbar-btn.danger { background: #FEF2F2; color: #DC2626; }
@@ -898,25 +890,13 @@
     /* Toast (in-session file shared) */
     .session-toast {
       position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%);
-      padding: 0.6rem 1rem; background: rgba(17, 24, 39, 0.85); color: #fff;
+      padding: 0.6rem 1rem; background: #111827; color: #fff;
       border-radius: 10px; font-size: 0.8125rem; font-weight: 500;
       z-index: 1001; opacity: 0; pointer-events: none;
       transition: opacity 0.25s ease;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.15);
-      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
     }
-    .session-toast.visible { opacity: 1; pointer-events: auto; }
-    .session-toast.toast-processing {
-      background: rgba(255, 115, 85, 0.92); backdrop-filter: blur(8px);
-    }
-    .session-toast.toast-processing::before {
-      content: ""; display: inline-block; width: 12px; height: 12px;
-      border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff;
-      border-radius: 50%; animation: spin 0.8s linear infinite;
-      margin-right: 0.5rem; vertical-align: middle;
-    }
-    .session-toast.toast-success { background: rgba(16, 185, 129, 0.92); backdrop-filter: blur(8px); }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    .session-toast.visible { opacity: 1; }
 
     /* Idle timeout modal */
     #timeoutModal {
@@ -963,7 +943,7 @@
     /* ── REFLECTION LOADING ───────────────────────── */
     #reflection-loading-screen {
       display: none; position: fixed; inset: 0; z-index: 200;
-      background: var(--dasko-bg); flex-direction: column; align-items: center; justify-content: center;
+      background: #fff; flex-direction: column; align-items: center; justify-content: center;
       gap: 1.5rem;
     }
     #reflection-loading-screen.visible { display: flex; }
@@ -985,86 +965,140 @@
       font-size: 0.9375rem; color: #6B7280; text-align: center; max-width: 280px;
     }
 
-    /* ── REFLECTION (Bento) ───────────────────────── */
+    /* ── REFLECTION (Redesigned) ────────────────────── */
     #reflection-screen {
       display: none; width: 100%; min-height: 100vh;
-      padding: 2rem 1rem; transition: opacity 0.3s ease-in-out;
-      background: var(--dasko-bg);
+      padding: 3rem 1.5rem; transition: opacity 0.3s ease-in-out;
+      background: #fcfcfc;
     }
     #reflection-screen.show { display: block; }
-    .reflection-inner { max-width: 56rem; margin: 0 auto; }
-    .reflection-recap { font-size: 1rem; color: var(--dasko-text-secondary); line-height: 1.7; }
-    .reflection-recap strong { color: var(--dasko-text); }
-    .reflection-recap-standalone {
-      margin-bottom: 1.75rem; padding: 1rem 1.25rem; border-radius: 0.75rem;
-      background: rgba(255,255,255,0.5); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-      border: 1px solid var(--dasko-border);
+    .reflection-inner { max-width: 68rem; margin: 0 auto; }
+    .reflection-title {
+      font-size: 2.25rem; font-weight: 900; letter-spacing: -0.02em;
+      color: #0f172a; margin-bottom: 0.5rem;
     }
-    .reflection-title { font-size: 1.75rem; font-weight: 700; text-align: center; color: var(--dasko-text); margin-bottom: 0.6rem; letter-spacing: -0.02em; }
-    .reflection-summary { text-align: center; color: var(--dasko-text-secondary); font-size: 1.05rem; line-height: 1.7; font-weight: 400; margin-bottom: 1.75rem; }
-    .reflection-bento {
-      display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
+    .reflection-summary {
+      color: #64748b; font-size: 1.1rem; line-height: 1.7; font-weight: 400;
+      margin-bottom: 2.5rem; max-width: 48rem;
     }
+    /* Topic card */
+    .reflection-topic-card {
+      display: flex; align-items: center; justify-content: space-between;
+      background: #e0f2f1; border-radius: 1rem; padding: 2rem 2.5rem;
+      border: 1px solid #b2dfdb; margin-bottom: 2.5rem; gap: 1.5rem; flex-wrap: wrap;
+    }
+    .reflection-topic-label {
+      font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.08em; color: #00796b; margin-bottom: 0.25rem; display: block;
+    }
+    .reflection-topic-name { font-size: 1.875rem; font-weight: 800; color: #0f172a; margin: 0; }
+    .reflection-topic-meta { font-size: 0.95rem; color: #475569; margin-top: 0.5rem; font-weight: 500; }
+    .reflection-download-btn {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.7rem 1.5rem; border-radius: 0.75rem;
+      background: #fff; border: 1px solid #b2dfdb; color: #00796b;
+      font-family: inherit; font-size: 0.875rem; font-weight: 600;
+      cursor: pointer; transition: all 0.2s; white-space: nowrap;
+    }
+    .reflection-download-btn:hover { background: #00796b; color: #fff; border-color: #00796b; }
+    .reflection-download-icon { font-size: 1rem; }
+    /* Bento grid */
+    .reflection-bento { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
     .reflection-bento .bento-row1 { grid-column: span 1; }
-    .reflection-bento .bento-row2 { grid-column: 1 / -1; }
+    .reflection-bento .bento-full { grid-column: 1 / -1; }
     @media (max-width: 768px) {
       .reflection-bento { grid-template-columns: 1fr; }
-      .reflection-bento .bento-row1, .reflection-bento .bento-row2 { grid-column: span 1; }
+      .reflection-bento .bento-row1, .reflection-bento .bento-full { grid-column: span 1; }
+      .reflection-topic-card { flex-direction: column; align-items: flex-start; }
     }
+    /* Cards */
     .reflection-card {
-      padding: 1.5rem; border-left-width: 4px; border-left-style: solid; border-left-color: var(--dasko-border-solid);
-      border-radius: 1rem; transition: var(--dasko-transition);
-      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-      border: 1px solid var(--dasko-border); border-left-width: 4px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+      padding: 1.5rem; border-radius: 1rem;
+      border: 1px solid #e2e8f0; background: #fff;
+      transition: box-shadow 0.2s;
     }
+    .reflection-card:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.04); }
     .reflection-card h3 {
-      font-size: 0.8rem; font-weight: 700; text-transform: uppercase;
-      letter-spacing: 0.06em; color: var(--dasko-text); margin-bottom: 0.75rem;
+      font-size: 1.15rem; font-weight: 700; color: #0f172a;
+      margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;
     }
-    .reflection-card ul { list-style: none; padding: 0; }
-    .reflection-card li { font-size: 0.95rem; font-weight: 400; color: var(--dasko-text); padding: 0.45rem 0; line-height: 1.6; }
-    .reflection-card li::before { margin-right: 0.5rem; }
-    .reflection-card.card-strength { background: rgba(16, 185, 129, 0.08); border-left-color: #10B981; }
-    .reflection-card.card-strength h3 { color: #059669; }
-    .reflection-card.card-strength li::before { content: "\2022"; color: #10B981; }
-    .reflection-card.card-strength .reflection-highlight { font-weight: 600; color: #059669; }
-    .reflection-card.card-gap { background: rgba(255, 115, 85, 0.08); border-left-color: var(--dasko-accent); }
-    .reflection-card.card-gap h3 { color: var(--dasko-accent); }
-    .reflection-card.card-gap li::before { content: "\2022"; color: var(--dasko-accent); }
-    .reflection-card.card-gap .reflection-highlight { font-weight: 600; color: #E5553B; }
-    .reflection-card.card-improvement { background: rgba(255, 115, 85, 0.05); border-left-color: var(--dasko-accent); }
-    .reflection-card.card-improvement h3 { color: #E5553B; }
-    .reflection-card.card-improvement li::before { content: "\2022"; color: var(--dasko-accent); }
-    .reflection-card.card-improvement .reflection-highlight { font-weight: 600; color: #E5553B; }
-    .reflection-card.card-questions { background: rgba(255, 115, 85, 0.04); border-left-color: #FF9F85; }
-    .reflection-card.card-questions h3 { color: var(--dasko-accent); }
-    .reflection-card.card-questions li::before { content: "\2022"; color: #FF9F85; }
-    .reflection-checklist { list-style: none; padding: 0; }
-    .reflection-checklist li { display: flex; align-items: flex-start; gap: 0.5rem; padding: 0.5rem 0; font-size: 0.95rem; }
-    .reflection-checklist input[type="checkbox"] { margin-top: 0.25rem; accent-color: var(--dasko-accent); width: 1rem; height: 1rem; }
-    .reflection-card.presentation-card { grid-column: 1 / -1; }
-    .reflection-skill-row {
-      display: flex; align-items: flex-start; gap: 0.75rem; margin-bottom: 0.75rem;
-      padding: 0.6rem 0.75rem; background: rgba(255,255,255,0.4); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-      border-radius: 0.5rem; border: 1px solid var(--dasko-border);
+    .rcard-icon { font-size: 1.1rem; }
+    .rcard-icon-strength { color: #0d9488; }
+    .rcard-icon-gap { color: #f472b6; }
+    /* Card item rows */
+    .rcard-items { display: flex; flex-direction: column; gap: 0.5rem; }
+    .rcard-item {
+      display: flex; align-items: center; gap: 0.75rem;
+      padding: 0.85rem 1rem; border-radius: 0.75rem; border: 1px solid #e2e8f0;
+      font-size: 0.9375rem; font-weight: 600; color: #334155;
     }
-    .reflection-skill-row:last-child { margin-bottom: 0; }
-    .reflection-skill-icon { font-size: 1.25rem; flex-shrink: 0; }
-    .reflection-skill-content { flex: 1; min-width: 0; }
-    .reflection-skill-label { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dasko-text); margin-bottom: 0.3rem; }
-    .reflection-skill-text { font-size: 0.95rem; color: var(--dasko-text); line-height: 1.6; }
-    .reflection-empty-msg { font-size: 0.95rem; color: var(--dasko-text-secondary); font-style: italic; padding: 0.5rem 0; }
-    .reflection-actions { display: flex; gap: 0.75rem; justify-content: center; margin-top: 1.5rem; flex-wrap: wrap; }
+    .rcard-item-icon { font-size: 1rem; flex-shrink: 0; }
+    .card-strength .rcard-item { background: rgba(224,242,241,0.5); }
+    .card-strength .rcard-item-icon { color: #0d9488; }
+    .card-strength .reflection-highlight { font-weight: 700; color: #0d9488; }
+    .card-gap .rcard-item { background: rgba(252,231,243,0.4); }
+    .card-gap .rcard-item-icon { color: #f472b6; }
+    .card-gap .reflection-highlight { font-weight: 700; color: #e11d48; }
+    /* Vocabulary tags */
+    .card-vocab { background: #fff; }
+    .rcard-vocab-tags { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .rcard-vocab-tag {
+      padding: 0.5rem 1rem; background: #f3e5f5; color: #7b1fa2;
+      border: 1px solid #e1bee7; border-radius: 999px; font-size: 0.8125rem; font-weight: 700;
+    }
+    /* Next steps */
+    .card-improvement { background: #fff; }
+    .rcard-next-steps { list-style: disc; padding-left: 1.25rem; margin: 0; }
+    .rcard-next-steps li {
+      font-size: 0.9375rem; font-weight: 500; color: #334155;
+      padding: 0.35rem 0; line-height: 1.6;
+    }
+    .card-improvement .reflection-highlight { font-weight: 700; color: #4338ca; }
+    /* Questions */
+    .card-questions { background: #fff; }
+    .rcard-questions-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+    @media (max-width: 600px) { .rcard-questions-grid { grid-template-columns: 1fr; } }
+    .rcard-question {
+      padding: 1rem 1.25rem; background: rgba(255,243,224,0.5);
+      border-radius: 0.75rem; border-left: 4px solid #ffcc80;
+      font-size: 0.9375rem; font-weight: 500; font-style: italic; color: #334155;
+    }
+    /* Presentation feedback */
+    .card-presentation { background: #fff; }
+    .rcard-feedback-box {
+      padding: 1.25rem 1.5rem; background: rgba(224,242,241,0.35);
+      border-radius: 0.75rem; border: 1px solid #e2e8f0;
+    }
+    .rcard-feedback-box .reflection-skill-text {
+      font-size: 0.9375rem; color: #334155; line-height: 1.7;
+    }
+    /* Mechanics grid */
+    .card-mechanics { background: #fff; }
+    .rcard-mechanics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; }
+    @media (max-width: 600px) { .rcard-mechanics-grid { grid-template-columns: repeat(2, 1fr); } }
+    .rcard-mechanic {
+      display: flex; flex-direction: column; align-items: center;
+      padding: 1.25rem 0.75rem; background: rgba(243,229,245,0.3);
+      border-radius: 0.75rem; border: 1px solid #e2e8f0; text-align: center;
+    }
+    .rcard-mechanic-icon { font-size: 1.5rem; margin-bottom: 0.4rem; color: #b39cd0; }
+    .rcard-mechanic-label { font-size: 0.8125rem; font-weight: 800; color: #0f172a; }
+    .rcard-mechanic-value { font-size: 0.75rem; font-weight: 700; color: #64748b; }
+    .reflection-empty-msg { font-size: 0.95rem; color: #94a3b8; font-style: italic; padding: 0.5rem 0; }
+    /* Actions */
+    .reflection-actions { display: flex; gap: 0.75rem; justify-content: center; margin-top: 3rem; flex-wrap: wrap; }
     .reflection-btn {
-      padding: 0.85rem 1.75rem; border: 1px solid var(--dasko-border); border-radius: 0.75rem;
-      background: rgba(255,255,255,0.5); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-      font-family: inherit; font-size: 1rem; font-weight: 500;
-      color: var(--dasko-text); cursor: pointer; transition: background 0.2s, box-shadow 0.2s;
+      padding: 1rem 2.5rem; border: 1px solid #e2e8f0; border-radius: 0.75rem;
+      background: #fff; font-family: inherit; font-size: 1.05rem; font-weight: 500;
+      color: #334155; cursor: pointer; transition: all 0.2s;
     }
-    .reflection-btn:hover { background: rgba(255,255,255,0.8); box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
-    .reflection-btn.primary { background: var(--dasko-accent); color: #fff; border-color: var(--dasko-accent); box-shadow: 0 4px 12px var(--dasko-accent-shadow); }
-    .reflection-btn.primary:hover { opacity: 0.95; box-shadow: 0 6px 16px var(--dasko-accent-shadow); }
+    .reflection-btn:hover { background: #f8fafc; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .reflection-btn.primary {
+      background: #b39cd0; color: #fff; border-color: #b39cd0;
+      font-weight: 800; font-size: 1.15rem; padding: 1rem 3rem;
+      box-shadow: 0 4px 16px rgba(179,156,208,0.3); display: flex; align-items: center; gap: 0.5rem;
+    }
+    .reflection-btn.primary:hover { opacity: 0.92; box-shadow: 0 6px 20px rgba(179,156,208,0.4); }
 
     /* ── Responsive ──────────────────────────────── */
     @media (max-width: 1100px) {
@@ -1163,9 +1197,9 @@
             <div class="materials-section">
               <label class="field-label">Study materials <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--dasko-text-secondary)">(optional)</span></label>
               <div class="file-drop-zone" id="fileDropZone">
-                <input type="file" class="file-drop-input" id="fileInput" multiple accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv,.doc,.docx,.mp4,.mov,.webm,.avi" />
+                <input type="file" class="file-drop-input" id="fileInput" multiple accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv,.doc,.docx" />
                 <div class="file-drop-icon">&#x1F4CE;</div>
-                <div class="file-drop-label">Drop files here or <span>browse</span><br>PDF, images, video, text files (up to 100MB)</div>
+                <div class="file-drop-label">Drop files here or <span>browse</span><br>PDF, images, text files</div>
               </div>
               <div class="materials-divider">or paste notes</div>
               <textarea id="materials" placeholder="Paste notes or a reading you'd expect your students to have studied&hellip;"></textarea>
@@ -1424,7 +1458,7 @@
         <input type="text" id="chatInput" placeholder="Type a message&hellip;" />
         <button id="chatSendBtn" type="button">Send</button>
       </div>
-      <input type="file" id="sessionFileInput" class="file-drop-input" multiple accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv,.doc,.docx,.mp4,.mov,.webm,.avi" style="display:none;" />
+      <input type="file" id="sessionFileInput" class="file-drop-input" multiple accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv,.doc,.docx" style="display:none;" />
     </div>
     <div class="session-toast" id="sessionToast" role="status" aria-live="polite"></div>
 
@@ -1467,66 +1501,99 @@
   <!-- REFLECTION (Bento) -->
   <div id="reflection-screen">
     <div class="reflection-inner">
+      <!-- Header -->
       <h2 class="reflection-title">Session Reflection</h2>
       <p class="reflection-summary" id="reflectionSummary"></p>
-      <div class="reflection-recap reflection-recap-standalone" id="reflectionRecap">
-        <p><strong>Topic:</strong> <span id="reflectionRecapTopic"></span></p>
-        <p><strong>Mode:</strong> <span id="reflectionRecapMode"></span></p>
-        <p><strong>Duration:</strong> <span id="reflectionRecapDuration"></span></p>
-      </div>
-      <div class="reflection-bento">
-        <div class="reflection-card card-strength bento-row1 glass-card" id="reflectionCardStrength">
-          <h3>What went well</h3>
-          <ul id="reflectionStrengths"></ul>
+
+      <!-- Topic card with download button -->
+      <div class="reflection-topic-card" id="reflectionRecap">
+        <div class="reflection-topic-left">
+          <span class="reflection-topic-label">Topic of Discussion</span>
+          <h3 class="reflection-topic-name" id="reflectionRecapTopic"></h3>
+          <p class="reflection-topic-meta">
+            <span id="reflectionRecapMode"></span> &bull;
+            <span id="reflectionRecapDuration"></span> Session
+          </p>
         </div>
-        <div class="reflection-card card-gap bento-row1 glass-card" id="reflectionCardGap">
-          <h3>Concepts to revisit</h3>
-          <ul id="reflectionGaps"></ul>
+        <button class="reflection-download-btn" id="downloadSummaryBtn" type="button" title="Download PDF summary">
+          <span class="reflection-download-icon">&#x1F4E5;</span> Download Summary
+        </button>
+      </div>
+
+      <!-- Two-column grid -->
+      <div class="reflection-bento">
+        <!-- What Went Well -->
+        <div class="reflection-card card-strength bento-row1" id="reflectionCardStrength">
+          <h3><span class="rcard-icon rcard-icon-strength">&#x2714;</span> What Went Well</h3>
+          <div class="rcard-items" id="reflectionStrengths"></div>
+        </div>
+        <!-- Concepts to Revisit -->
+        <div class="reflection-card card-gap bento-row1" id="reflectionCardGap">
+          <h3><span class="rcard-icon rcard-icon-gap">&#x26A0;</span> Concepts to Revisit</h3>
+          <div class="rcard-items" id="reflectionGaps"></div>
           <p class="reflection-empty-msg" id="reflectionGapsEmpty" style="display:none;">Mastery achieved! You explained every point clearly.</p>
         </div>
-        <div class="reflection-card card-improvement bento-row2 glass-card" id="reflectionCardImprovement">
-          <h3>Next steps</h3>
-          <ul class="reflection-checklist" id="reflectionImprovementsChecklist"></ul>
+        <!-- Key Vocabulary -->
+        <div class="reflection-card card-vocab bento-row1" id="reflectionCardVocab">
+          <h3>Key Vocabulary</h3>
+          <div class="rcard-vocab-tags" id="reflectionVocabulary"></div>
         </div>
-        <div class="reflection-card card-questions bento-row2 glass-card" id="reflectionCardQuestions">
-          <h3>Student questions</h3>
-          <ul id="reflectionQuestions"></ul>
+        <!-- Next Steps -->
+        <div class="reflection-card card-improvement bento-row1" id="reflectionCardImprovement">
+          <h3>Next Steps</h3>
+          <ul class="rcard-next-steps" id="reflectionImprovementsChecklist"></ul>
         </div>
-        <div class="reflection-card presentation-card glass-card" id="reflectionCardPresentation">
-          <h3>Presentation &amp; Mechanics</h3>
-          <div id="reflectionPresentationSkills">
-            <div class="reflection-skill-row">
-              <span class="reflection-skill-icon" aria-hidden="true">&#x1F4F9;</span>
-              <div class="reflection-skill-content">
-                <div class="reflection-skill-label">Visuals &amp; Hand Gestures</div>
-                <div class="reflection-skill-text" id="reflectionVisualsGestures">—</div>
-              </div>
-            </div>
-            <div class="reflection-skill-row">
-              <span class="reflection-skill-icon" aria-hidden="true">&#x1F4DD;</span>
-              <div class="reflection-skill-content">
-                <div class="reflection-skill-label">Explanations</div>
-                <div class="reflection-skill-text" id="reflectionExplanations">—</div>
-              </div>
-            </div>
-            <div class="reflection-skill-row">
-              <span class="reflection-skill-icon" aria-hidden="true">&#x1F4C1;</span>
-              <div class="reflection-skill-content">
-                <div class="reflection-skill-label">Screen Sharing / Class Materials</div>
-                <div class="reflection-skill-text" id="reflectionMediaUsage">—</div>
-              </div>
-            </div>
+        <!-- Student Questions -->
+        <div class="reflection-card card-questions bento-full" id="reflectionCardQuestions">
+          <h3>Student Questions</h3>
+          <div class="rcard-questions-grid" id="reflectionQuestions"></div>
+        </div>
+        <!-- Presentation Skills Feedback -->
+        <div class="reflection-card card-presentation bento-full" id="reflectionCardPresentation">
+          <h3>Presentation Skills Feedback</h3>
+          <div class="rcard-feedback-box">
+            <div class="reflection-skill-text" id="reflectionVisualsGestures">—</div>
           </div>
           <p class="reflection-empty-msg" id="reflectionVisualsEmpty" style="display:none;"></p>
         </div>
+        <!-- Presentation & Mechanics -->
+        <div class="reflection-card card-mechanics bento-full" id="reflectionCardMechanics">
+          <h3>Presentation &amp; Mechanics</h3>
+          <div class="rcard-mechanics-grid" id="reflectionMechanicsGrid">
+            <div class="rcard-mechanic">
+              <span class="rcard-mechanic-icon">&#x1F50A;</span>
+              <span class="rcard-mechanic-label">Clarity</span>
+              <span class="rcard-mechanic-value" id="mechClarity">—</span>
+            </div>
+            <div class="rcard-mechanic">
+              <span class="rcard-mechanic-icon">&#x1F441;</span>
+              <span class="rcard-mechanic-label">Visuals</span>
+              <span class="rcard-mechanic-value" id="mechVisuals">—</span>
+            </div>
+            <div class="rcard-mechanic">
+              <span class="rcard-mechanic-icon">&#x23F1;</span>
+              <span class="rcard-mechanic-label">Pacing</span>
+              <span class="rcard-mechanic-value" id="mechPacing">—</span>
+            </div>
+            <div class="rcard-mechanic">
+              <span class="rcard-mechanic-icon">&#x1F6E0;</span>
+              <span class="rcard-mechanic-label">Tools</span>
+              <span class="rcard-mechanic-value" id="mechTools">—</span>
+            </div>
+          </div>
+        </div>
       </div>
+
+      <!-- Actions -->
       <div class="reflection-actions">
-        <button class="reflection-btn primary" id="changeTopicBtn" type="button">Change topic</button>
+        <button class="reflection-btn primary" id="teachAgainBtn" type="button">&#x1F393; Teach Again</button>
+        <button class="reflection-btn" id="changeTopicBtn" type="button">Change topic</button>
       </div>
     </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/jspdf@latest/dist/jspdf.umd.min.js"></script>
   <!-- Firebase SDK (loads only if configured) -->
   <script>
     if (window.__FIREBASE_CONFIG && window.__FIREBASE_CONFIG.apiKey) {
