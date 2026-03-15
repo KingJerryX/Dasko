@@ -132,7 +132,6 @@ const SPEECH_ENERGY_THRESHOLD = 0.006;
 
 let vadInSpeech     = false;
 let vadSilenceCount = 0;
-let teacherSpeechEnded = false;
 
 // Whiteboard
 let currentTool  = "pen";
@@ -1502,10 +1501,14 @@ function startFrameSending() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     if (!cameraEnabled && !whiteboardEnabled && !screenEnabled) return;
 
+    // Only send frames when the teacher is speaking or recently spoke.
+    // This is the PRIMARY fix for hallucination: the model interprets
+    // incoming video frames as "the user is active" and generates
+    // unprompted responses. By gating frames to the speech window,
+    // we prevent the model from talking when the teacher is silent.
     const now = Date.now();
     const inSpeechWindow = vadInSpeech || (now - lastSpeechFrameTime < FRAME_SPEECH_WINDOW_MS);
-    const boardOrScreenDirty = whiteboardEnabled && canvasDirty;
-    if (!inSpeechWindow && !boardOrScreenDirty && !screenEnabled) return;
+    if (!inSpeechWindow) return;
 
     const ctx = compositeCanvas.getContext("2d");
     ctx.fillStyle = "#fff";
@@ -1535,7 +1538,7 @@ function startFrameSending() {
       } catch (_) {}
     }
 
-    const base64 = compositeCanvas.toDataURL("image/jpeg", 0.7).split(",")[1];
+    const base64 = compositeCanvas.toDataURL("image/jpeg", 0.5).split(",")[1];
     try { ws.send(JSON.stringify({ type: "video_frame", base64 })); } catch (_) {}
     canvasDirty = false;
   }, 2000);
@@ -1576,7 +1579,7 @@ async function startMic(existingStream = null) {
 
   // Pre-gain so quieter / far-away speech is audible to the AI (e.g. when teacher is far from device)
   const preGain = micContext.createGain();
-  preGain.gain.value = 2.2;
+  preGain.gain.value = 1.8;
   source.connect(preGain);
 
   micProcessor = micContext.createScriptProcessor(BUFFER_SIZE, 1, 1);
@@ -1593,10 +1596,8 @@ async function startMic(existingStream = null) {
       lastSpeechFrameTime = Date.now();
       if (!vadInSpeech) {
         vadInSpeech = true;
-        teacherSpeechEnded = false;
         setMicActive(true);
         if (currentOrbState !== "speaking") setOrbState("listening");
-        stopPlayback();
         try { ws.send(JSON.stringify({ type: "speech_start" })); } catch (_) {}
       }
       vadSilenceCount = 0;
@@ -1605,7 +1606,6 @@ async function startMic(existingStream = null) {
       if (vadSilenceCount >= SILENCE_BUFFERS_BEFORE_END) {
         vadInSpeech = false;
         vadSilenceCount = 0;
-        teacherSpeechEnded = true;
         lastSpeechFrameTime = Date.now();
         setMicActive(!micMuted);
         if (currentOrbState !== "speaking") setOrbState("thinking");
@@ -2133,16 +2133,6 @@ async function connect() {
       if (msg.type === "info") setStatus(msg.message || "", "connected");
       if (msg.type === "error") { lastError = msg.message; setStatus(msg.message, "error"); }
 
-      // Barge-in: teacher interrupted the student — flush playback and finalize student bubble
-      if (msg.type === "interrupted" || msg.interrupted === true) {
-        stopPlayback();
-        if (currentStudentEntry) {
-          const entry = currentStudentEntry;
-          currentStudentEntry = null;
-          lastStudentFinalizedAt = Date.now();
-          if (entry.rawText.trim()) cleanupEntry(entry, false).catch(() => {});
-        }
-      }
 
       // Teacher transcript: new teacher turn — close any open student entry first.
       if (msg.type === "teacher_transcript" && msg.text) {
@@ -2250,6 +2240,11 @@ async function connect() {
       // Coaching tip
       if (msg.type === "coaching_tip" && msg.tip) {
         addCoachingTip(msg.tip);
+      }
+
+      // Student diagram
+      if (msg.type === "student_diagram" && msg.base64) {
+        showDiagramThumbnail(msg.studentId, msg.base64, msg.mimeType || "image/png");
       }
 
       // Reflection
@@ -2433,3 +2428,373 @@ if (sessionHomeBtn) {
     showLanding();
   });
 }
+
+// ── Server logs panel ──────────────────────────────────────────────────────────
+(function () {
+  const logsPanel   = document.getElementById("logsPanel");
+  const logsBody    = document.getElementById("logsBody");
+  const logsCloseBtn = document.getElementById("logsCloseBtn");
+  const logsClearBtn = document.getElementById("logsClearBtn");
+  const toggleLogsBtn = document.getElementById("toggleLogsBtn");
+  if (!logsPanel || !logsBody) return;
+
+  let logsVisible = false;
+  let logsPollTimer = null;
+  let lastLogTs = 0;
+
+  function formatTs(ts) {
+    const d = new Date(ts);
+    return d.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  }
+
+  function addLogLine(entry) {
+    const div = document.createElement("div");
+    div.className = "log-line log-" + (entry.level || "info");
+    const ts = document.createElement("span");
+    ts.className = "log-ts";
+    ts.textContent = formatTs(entry.ts);
+    div.appendChild(ts);
+    div.appendChild(document.createTextNode(entry.msg));
+    logsBody.appendChild(div);
+  }
+
+  async function pollLogs() {
+    try {
+      const res = await fetch("/api/logs?since=" + lastLogTs);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.logs && data.logs.length) {
+        const autoScroll = logsBody.scrollHeight - logsBody.scrollTop - logsBody.clientHeight < 50;
+        for (const entry of data.logs) {
+          addLogLine(entry);
+          if (entry.ts > lastLogTs) lastLogTs = entry.ts;
+        }
+        if (autoScroll) logsBody.scrollTop = logsBody.scrollHeight;
+      }
+    } catch (_) {}
+  }
+
+  function startPolling() {
+    if (logsPollTimer) return;
+    pollLogs();
+    logsPollTimer = setInterval(pollLogs, 2000);
+  }
+
+  function stopPolling() {
+    if (logsPollTimer) { clearInterval(logsPollTimer); logsPollTimer = null; }
+  }
+
+  function showLogs() {
+    logsVisible = true;
+    logsPanel.classList.add("visible");
+    if (toggleLogsBtn) toggleLogsBtn.classList.add("active");
+    startPolling();
+  }
+
+  function hideLogs() {
+    logsVisible = false;
+    logsPanel.classList.remove("visible");
+    if (toggleLogsBtn) toggleLogsBtn.classList.remove("active");
+    stopPolling();
+  }
+
+  if (toggleLogsBtn) {
+    toggleLogsBtn.addEventListener("click", () => {
+      if (logsVisible) hideLogs(); else showLogs();
+    });
+  }
+  if (logsCloseBtn) logsCloseBtn.addEventListener("click", hideLogs);
+  if (logsClearBtn) logsClearBtn.addEventListener("click", () => {
+    logsBody.innerHTML = "";
+  });
+})();
+
+// ── Diagram popup ─────────────────────────────────────────────────────────────
+(function () {
+  const popup          = document.getElementById("diagramPopup");
+  const titlebar       = document.getElementById("diagramTitlebar");
+  const closeBtn       = document.getElementById("diagramCloseBtn");
+  const fullscreenBtn  = document.getElementById("diagramFullscreenBtn");
+  const canvas         = document.getElementById("diagramCanvas");
+  const toolbar        = document.getElementById("diagramToolbar");
+  const penBtn         = document.getElementById("diagPenBtn");
+  const eraserBtn      = document.getElementById("diagEraserBtn");
+  const textBtn        = document.getElementById("diagTextBtn");
+  const clearBtn       = document.getElementById("diagClearBtn");
+  const sizeSlider     = document.getElementById("diagSizeSlider");
+  const resizeHandle   = document.getElementById("diagramResizeHandle");
+
+  if (!popup || !canvas) return;
+  const ctx = canvas.getContext("2d");
+
+  // ── State ──────────────────────────────────────────────────────────────────
+  let diagTool         = "pen";
+  let diagColor        = "#000000";
+  let diagPenSize      = 3;
+  let diagDrawing      = false;
+  let diagLastX        = 0;
+  let diagLastY        = 0;
+  let baseImageData    = null;   // snapshot after diagram image is drawn (for clear)
+  let isDraggingDiagram   = false;
+  let isResizingDiagram   = false;
+  let dragOffX = 0, dragOffY = 0;
+  let resizeStartX = 0, resizeStartY = 0;
+  let resizeStartW = 0, resizeStartH = 0;
+
+  // Keep last received diagram for re-loading after resize/fullscreen
+  let lastDiagramBase64  = null;
+  let lastDiagramMime    = "image/png";
+
+  // ── Tool switching ──────────────────────────────────────────────────────────
+  function setDiagTool(t) {
+    diagTool = t;
+    [penBtn, eraserBtn, textBtn].forEach(b => b && b.classList.remove("active"));
+    if (t === "pen"    && penBtn)    penBtn.classList.add("active");
+    if (t === "eraser" && eraserBtn) eraserBtn.classList.add("active");
+    if (t === "text"   && textBtn)   textBtn.classList.add("active");
+    canvas.style.cursor = t === "eraser" ? "cell" : t === "text" ? "text" : "crosshair";
+  }
+
+  if (penBtn)    penBtn.addEventListener("click",    () => setDiagTool("pen"));
+  if (eraserBtn) eraserBtn.addEventListener("click", () => setDiagTool("eraser"));
+  if (textBtn)   textBtn.addEventListener("click",   () => setDiagTool("text"));
+
+  // ── Color swatches ──────────────────────────────────────────────────────────
+  if (toolbar) {
+    toolbar.querySelectorAll(".diag-color-swatch").forEach(swatch => {
+      swatch.addEventListener("click", () => {
+        toolbar.querySelectorAll(".diag-color-swatch").forEach(s => s.classList.remove("active"));
+        swatch.classList.add("active");
+        diagColor = swatch.dataset.color || "#000000";
+        if (diagTool === "eraser") setDiagTool("pen");
+      });
+    });
+  }
+
+  // ── Size slider ─────────────────────────────────────────────────────────────
+  if (sizeSlider) {
+    sizeSlider.addEventListener("input", () => { diagPenSize = parseInt(sizeSlider.value, 10) || 3; });
+  }
+
+  // ── Clear ───────────────────────────────────────────────────────────────────
+  if (clearBtn) {
+    clearBtn.addEventListener("click", () => {
+      if (baseImageData) {
+        ctx.putImageData(baseImageData, 0, 0);
+      } else {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    });
+  }
+
+  // ── Close / fullscreen ──────────────────────────────────────────────────────
+  if (closeBtn) {
+    closeBtn.addEventListener("click", () => popup.classList.remove("visible"));
+  }
+  if (fullscreenBtn) {
+    fullscreenBtn.addEventListener("click", () => {
+      popup.classList.toggle("diagram-fullscreen");
+      fullscreenBtn.textContent = popup.classList.contains("diagram-fullscreen") ? "\u2716" : "\u26F6";
+      // Re-draw the diagram image into the now-resized canvas
+      if (lastDiagramBase64) {
+        setTimeout(() => loadDiagramIntoCanvas(lastDiagramBase64, lastDiagramMime), 50);
+      }
+    });
+  }
+
+  // ── Drawing events ──────────────────────────────────────────────────────────
+  function getCanvasPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width  / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+  }
+
+  canvas.addEventListener("mousedown", onDiagStart);
+  canvas.addEventListener("mousemove", onDiagMove);
+  canvas.addEventListener("mouseup",   onDiagEnd);
+  canvas.addEventListener("mouseleave", onDiagEnd);
+  canvas.addEventListener("touchstart", onDiagStart, { passive: false });
+  canvas.addEventListener("touchmove",  onDiagMove,  { passive: false });
+  canvas.addEventListener("touchend",   onDiagEnd);
+
+  function onDiagStart(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const { x, y } = getCanvasPos(e);
+    if (diagTool === "text") {
+      const input = prompt("Enter text:");
+      if (input) {
+        ctx.font = `${diagPenSize * 5 + 10}px Inter, sans-serif`;
+        ctx.fillStyle = diagColor;
+        ctx.fillText(input, x, y);
+      }
+      return;
+    }
+    diagDrawing = true;
+    diagLastX   = x;
+    diagLastY   = y;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  }
+
+  function onDiagMove(e) {
+    e.preventDefault();
+    if (!diagDrawing) return;
+    const { x, y } = getCanvasPos(e);
+    ctx.lineJoin = "round";
+    ctx.lineCap  = "round";
+    if (diagTool === "eraser") {
+      ctx.globalCompositeOperation = "destination-out";
+      ctx.lineWidth = diagPenSize * 6;
+      ctx.strokeStyle = "rgba(0,0,0,1)";
+    } else {
+      ctx.globalCompositeOperation = "source-over";
+      ctx.lineWidth   = diagPenSize;
+      ctx.strokeStyle = diagColor;
+    }
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    diagLastX = x; diagLastY = y;
+  }
+
+  function onDiagEnd(e) {
+    if (diagDrawing) {
+      ctx.globalCompositeOperation = "source-over";
+      diagDrawing = false;
+    }
+  }
+
+  // ── Drag (titlebar) ─────────────────────────────────────────────────────────
+  if (titlebar) {
+    titlebar.addEventListener("mousedown", (e) => {
+      if (e.target.tagName === "BUTTON") return;
+      if (popup.classList.contains("diagram-fullscreen")) return;
+      isDraggingDiagram = true;
+      const rect = popup.getBoundingClientRect();
+      dragOffX = e.clientX - rect.left;
+      dragOffY = e.clientY - rect.top;
+      e.preventDefault();
+    });
+  }
+
+  // ── Resize handle ───────────────────────────────────────────────────────────
+  if (resizeHandle) {
+    resizeHandle.addEventListener("mousedown", (e) => {
+      if (popup.classList.contains("diagram-fullscreen")) return;
+      isResizingDiagram = true;
+      const rect = popup.getBoundingClientRect();
+      resizeStartX = e.clientX;
+      resizeStartY = e.clientY;
+      resizeStartW = rect.width;
+      resizeStartH = rect.height;
+      e.preventDefault();
+      e.stopPropagation();
+    });
+  }
+
+  document.addEventListener("mousemove", (e) => {
+    if (isDraggingDiagram) {
+      popup.style.left   = (e.clientX - dragOffX) + "px";
+      popup.style.top    = (e.clientY - dragOffY) + "px";
+      popup.style.bottom = "auto";
+      popup.style.right  = "auto";
+    }
+    if (isResizingDiagram) {
+      const newW = Math.max(300, resizeStartW + (e.clientX - resizeStartX));
+      const newH = Math.max(250, resizeStartH + (e.clientY - resizeStartY));
+      popup.style.width  = newW + "px";
+      popup.style.height = newH + "px";
+    }
+  });
+  document.addEventListener("mouseup", () => {
+    isDraggingDiagram = isResizingDiagram = false;
+  });
+
+  // ── Stop popup events reaching session ─────────────────────────────────────
+  popup.addEventListener("mousedown", (e) => e.stopPropagation());
+  popup.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
+
+  // ── Load image into canvas ──────────────────────────────────────────────────
+  function loadDiagramIntoCanvas(base64, mimeType) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const popupW = popup.offsetWidth   || 480;
+        const popupH = (popup.offsetHeight || 400) - (titlebar ? titlebar.offsetHeight : 32) - (toolbar ? toolbar.offsetHeight : 42);
+        canvas.width  = Math.max(popupW, 480);
+        canvas.height = Math.max(popupH, 250);
+        // Fill white background
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        // Scale image to fit, preserving aspect ratio
+        const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
+        const drawW = img.width  * scale;
+        const drawH = img.height * scale;
+        const drawX = (canvas.width  - drawW) / 2;
+        const drawY = (canvas.height - drawH) / 2;
+        ctx.drawImage(img, drawX, drawY, drawW, drawH);
+        // Snapshot after base image is drawn (for "clear annotations")
+        baseImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        resolve();
+      };
+      img.onerror = () => resolve();
+      img.src = `data:${mimeType};base64,${base64}`;
+    });
+  }
+
+  // ── Public: open popup with a diagram ──────────────────────────────────────
+  async function openDiagramPopup(base64, mimeType) {
+    lastDiagramBase64 = base64;
+    lastDiagramMime   = mimeType || "image/png";
+    // Reset position to default (bottom-right) unless user has moved it
+    if (!popup.style.left && !popup.style.top) {
+      popup.style.bottom = "80px";
+      popup.style.right  = "20px";
+    }
+    // Ensure visible before measuring dimensions
+    popup.classList.remove("diagram-fullscreen");
+    popup.classList.add("visible");
+    fullscreenBtn.textContent = "\u26F6";
+    setDiagTool("pen");
+    await loadDiagramIntoCanvas(base64, mimeType || "image/png");
+  }
+
+  // ── Public: show thumbnail card in transcript ───────────────────────────────
+  window.showDiagramThumbnail = function (studentId, base64, mimeType) {
+    const mime = mimeType || "image/png";
+    // Find the last transcript entry (the most recent student bubble) and append to it
+    const entries = transcriptBody ? transcriptBody.querySelectorAll(".t-entry") : [];
+    const targetEntry = entries.length ? entries[entries.length - 1] : null;
+
+    const card = document.createElement("div");
+    card.className = "t-diagram-card";
+
+    const thumb = document.createElement("img");
+    thumb.className = "t-diagram-thumb";
+    thumb.src = `data:${mime};base64,${base64}`;
+    thumb.alt = "Student sketch";
+
+    const btn = document.createElement("button");
+    btn.className = "t-diagram-open-btn";
+    btn.textContent = "\u270F\uFE0F Open & Annotate";
+
+    const openFn = () => openDiagramPopup(base64, mime);
+    thumb.addEventListener("click", openFn);
+    btn.addEventListener("click",   openFn);
+
+    card.appendChild(thumb);
+    card.appendChild(btn);
+
+    if (targetEntry) {
+      targetEntry.appendChild(card);
+    } else if (transcriptBody) {
+      transcriptBody.appendChild(card);
+    }
+    if (transcriptBody) transcriptBody.scrollTop = transcriptBody.scrollHeight;
+  };
+})();

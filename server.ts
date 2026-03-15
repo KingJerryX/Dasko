@@ -19,6 +19,21 @@ import {
 
 dotenv.config();
 
+// ── Server log capture (ring buffer for /api/logs) ──────────────────────────
+const LOG_RING_MAX = 500;
+const logRing: { ts: number; level: string; msg: string }[] = [];
+function pushLog(level: string, ...args: any[]) {
+  const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+  logRing.push({ ts: Date.now(), level, msg });
+  if (logRing.length > LOG_RING_MAX) logRing.splice(0, logRing.length - LOG_RING_MAX);
+}
+const origLog = console.log.bind(console);
+const origError = console.error.bind(console);
+const origWarn = console.warn.bind(console);
+console.log = (...args: any[]) => { origLog(...args); pushLog('info', ...args); };
+console.error = (...args: any[]) => { origError(...args); pushLog('error', ...args); };
+console.warn = (...args: any[]) => { origWarn(...args); pushLog('warn', ...args); };
+
 const GOOGLE_API_KEY = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
 if (!GOOGLE_API_KEY) {
   console.error('Missing GEMINI_API_KEY in .env');
@@ -30,6 +45,15 @@ const VIDEO_MODEL    = 'gemini-2.5-flash-native-audio-latest';
 const FAST_MODEL     = 'gemini-2.5-flash';
 // Heavier model for transcript cleanup only (accuracy over latency).
 const CLEANUP_MODEL  = process.env.CLEANUP_MODEL || 'gemini-2.5-pro';
+const IMAGE_MODEL    = 'gemini-2.5-flash-image';
+
+// ── Anti-hallucination: silence guard ────────────────────────────────────────
+// The Live API can interpret incoming video frames as "user is active" and
+// generate unprompted responses.  We track the last time the teacher actually
+// spoke (via speech_end) and refuse to relay video frames if the teacher has
+// been silent for more than this window.  This prevents the model from
+// hallucinating teacher input based solely on a webcam/whiteboard feed.
+const SILENCE_FRAME_GATE_MS = 8000; // only send frames within 8s of last speech
 
 const VALID_EMOTIONS = new Set(['curious', 'confused', 'excited', 'listening', 'thinking']);
 
@@ -43,12 +67,12 @@ const TOPICS = [
 ];
 
 const STUDENT_PROFILES: Record<string, string> = {
-  emma:   `Emma is enthusiastic and eager. She asks lots of questions, sometimes jumps ahead and makes overconfident guesses that turn out wrong. She gets visibly excited when things click.`,
-  marcus: `Marcus is a natural skeptic. He challenges every claim, asks for evidence and edge cases, and pushes back when something feels hand-wavy. Politely but firmly demanding.`,
-  lily:   `Lily gets lost easily and needs things broken down step by step. She often circles back to earlier points and asks for concrete examples before she can move on.`,
-  priya:  `Priya is a deep thinker who makes unexpected connections between concepts. She asks profound follow-up questions and occasionally goes on interesting intellectual tangents.`,
-  tyler:  `Tyler is barely paying attention. He gives distracted, half-hearted responses and asks obvious questions, but occasionally surprises everyone with an unexpectedly sharp observation.`,
-  zoe:    `Zoe thinks she already knows everything. She frequently tries to answer before the teacher finishes, is sometimes right and sometimes embarrassingly wrong, and needs gentle correction.`,
+  emma:   `Emma is enthusiastic and eager. She asks lots of questions, sometimes jumps ahead and makes overconfident guesses that turn out wrong. She gets visibly excited when things click. Mistake pattern: over-generalizes — she applies a rule confidently to a case where it has an important exception.`,
+  marcus: `Marcus is a natural skeptic. He challenges every claim, asks for evidence and edge cases, and pushes back when something feels hand-wavy. Politely but firmly demanding. Mistake pattern: states a plausible but wrong boundary condition with complete conviction ("that only applies when…").`,
+  lily:   `Lily gets lost easily and needs things broken down step by step. She often circles back to earlier points and asks for concrete examples before she can move on. Mistake pattern: reverses a relationship or confuses cause and effect ("so X causes Y" when it's actually Y causes X).`,
+  priya:  `Priya is a deep thinker who makes unexpected connections between concepts. She asks profound follow-up questions and occasionally goes on interesting intellectual tangents. Mistake pattern: makes a sophisticated-sounding but subtly wrong cross-domain connection (links the topic to another field using a faulty analogy that sounds compelling but breaks down under scrutiny).`,
+  tyler:  `Tyler is barely paying attention. He gives distracted, half-hearted responses and asks obvious questions, but occasionally surprises everyone with an unexpectedly sharp observation. Mistake pattern: states a sloppy over-simplification as if it's obviously true and everyone knows it.`,
+  zoe:    `Zoe thinks she already knows everything. She frequently tries to answer before the teacher finishes, is sometimes right and sometimes embarrassingly wrong, and needs gentle correction. Mistake pattern: confidently declares there's an important condition the teacher missed — but the condition itself is wrong.`,
 };
 
 const STUDENT_VOICES: Record<string, string> = {
@@ -138,9 +162,11 @@ function getClassroomInstruction(topic: string, studentIds: string[], materials:
 
 ## CRITICAL RULES (never violate)
 1. NEVER use stage directions, brackets, or narrate inner states (e.g. "[listens intently]", "[nods]", "[thinking]", "[analyzing image]"). Only speak actual words out loud.
-2. NEVER speak unless the teacher has said something new. If the teacher is silent, stay silent.
-3. NEVER hallucinate or invent teacher messages. If the teacher did not say something, do not pretend they did.
+2. NEVER speak unless the teacher has said something new via audio/speech. If the teacher is silent, stay COMPLETELY silent — produce NO audio output at all. Seeing a video frame or whiteboard image is NOT the teacher saying something. Only SPOKEN words from the teacher count as new input.
+3. NEVER hallucinate or invent teacher messages. If the teacher did not speak, do NOT generate a response. Do NOT imagine what the teacher might say or simulate their speech. If you are uncertain whether the teacher spoke, stay silent.
 4. NEVER say you are "analyzing", "looking at", or "examining" any image, video, feed, or file.
+5. Wait for the teacher to finish their full thought before responding. Do not jump in after a single sentence — wait for a clear pause.
+6. After your initial greeting, do NOT speak again until the teacher speaks first. Stay completely silent and wait.
 
 ## The students
 ${studentList}
@@ -175,17 +201,21 @@ Never skip this prefix — the interface depends on it to show who is speaking.
 - Never use stage directions or bracketed actions (e.g. "[listens intently]" or "[nods]"). Speak only the actual words the student says aloud.
 - Do not hallucinate teacher messages, agreement, or follow-up prompts. If the teacher has not provided new information, stay quiet.
 - Never explain the topic yourself. Never be sycophantic.
+- **Making mistakes:** ~30% of student summaries should contain a confident, topic-specific error (wrong cause/effect, reversed relationship, missed condition, confused concepts). The student states it as fact. When corrected, pushes back once before conceding. Wrong analogies alone are insufficient — the error must be in the substance of the topic. If the teacher does NOT correct the error after 1-2 exchanges (accepts it as true or moves on), the student who made the error must surface and correct it themselves.
 
-**If the teacher interrupts:** If the teacher speaks while a student is talking, that student **stops immediately.** Listen to the teacher's full point, then continue with the adjusted thought.
 
 ## Starting the session
 One student must greet the teacher out loud as the very first response (e.g. "Hi, we're ready when you are"). Do not say you cannot see or hear the teacher—greet them and indicate the class is ready.`;
 }
 
+const MISTAKE_INSTRUCTION = `\n\n**Confident mistakes:** About 30% of your summary statements should contain a real error — wrong cause/effect, reversed relationship, missed condition, or confused concepts. State errors confidently; never hedge. When corrected, push back once naturally ("wait, but I thought that meant…") before conceding. Do NOT make a mistake every turn — vary: some turns genuine questions, some correct summaries, ~30% have a real error. Self-correction safety net: if you stated something wrong and the teacher has NOT corrected it after 1-2 exchanges (they accepted it, moved on, or built on it), surface it yourself: "Wait, actually I think I got that wrong earlier — didn't you say it was actually…?"`;
+
 const PERSONA_TRAITS: Record<string, string> = {
-  eager: `You are enthusiastic and eager to learn. You sometimes jump ahead and make confident guesses — which are occasionally wrong. You get excited when things click ("Oh! So that's like...!") and ask "but what about...?" a lot. You might over-simplify things in your head and need the teacher to correct you.`,
-  skeptic: `You are naturally skeptical and need to be convinced. You question assumptions ("but why is that true?"), ask about edge cases and exceptions, and push back when something feels hand-wavy. You're not rude — just intellectually demanding. You want evidence and logic, not just assertions.`,
-  confused: `You get lost easily and need things broken down step by step. You often circle back to earlier points, ask "wait, can you say that differently?", and need concrete real-world examples before abstract ideas land. You're not slow — you just have high standards for your own understanding.`,
+  eager: `You are enthusiastic and eager to learn. You sometimes jump ahead and make confident guesses — which are occasionally wrong. You get excited when things click ("Oh! So that's like...!") and ask "but what about...?" a lot. You might over-simplify things in your head and need the teacher to correct you.` + MISTAKE_INSTRUCTION,
+
+  skeptic: `You are naturally skeptical and need to be convinced. You question assumptions ("but why is that true?"), ask about edge cases and exceptions, and push back when something feels hand-wavy. You're not rude — just intellectually demanding. You want evidence and logic, not just assertions.` + MISTAKE_INSTRUCTION,
+
+  confused: `You get lost easily and need things broken down step by step. You often circle back to earlier points, ask "wait, can you say that differently?", and need concrete real-world examples before abstract ideas land. You're not slow — you just have high standards for your own understanding.` + MISTAKE_INSTRUCTION,
 };
 
 function getStudentInstruction(topic: string, persona: string, materials: string, video: boolean, language: string): string {
@@ -199,9 +229,11 @@ function getStudentInstruction(topic: string, persona: string, materials: string
 
 ## CRITICAL RULES (never violate)
 1. NEVER use stage directions, brackets, or narrate inner states (e.g. "[listens intently]", "[nods]", "[thinking]", "[analyzing image]"). Only speak actual words out loud.
-2. NEVER speak unless the teacher has said something new. If the teacher is silent, stay silent.
-3. NEVER hallucinate or invent teacher messages. If the teacher did not say something, do not pretend they did.
+2. NEVER speak unless the teacher has said something new via audio/speech. If the teacher is silent, stay COMPLETELY silent — produce NO audio output at all. Seeing a video frame or whiteboard image is NOT the teacher saying something. Only SPOKEN words from the teacher count as new input.
+3. NEVER hallucinate or invent teacher messages. If the teacher did not speak, do NOT generate a response. Do NOT imagine what the teacher might say or simulate their speech. If you are uncertain whether the teacher spoke, stay silent.
 4. NEVER say you are "analyzing", "looking at", or "examining" any image, video, feed, or file.
+5. Wait for the teacher to finish their full thought before responding. Do not jump in after a single sentence — wait for a clear pause.
+6. After your initial greeting, do NOT speak again until the teacher speaks first. Stay completely silent and wait.
 
 ## Your persona
 ${personaTrait}
@@ -232,13 +264,19 @@ You are NOT a blank slate. You come in with partial knowledge, possible misconce
 - Sometimes summarise what you think you understood and check: "Okay so if I'm getting this right, it basically means... right?"
 - Reference things from prior reading if materials were provided.
 
+**Make confident, substantive mistakes:**
+- ~30% of your summary statements should contain a real error — wrong cause/effect, reversed relationship, missing a key condition, confused concepts.
+- State errors confidently. Never hedge ("I might be wrong but…").
+- When corrected, push back once naturally before conceding ("wait but I thought you said…").
+- Do NOT make mistakes every turn. Vary: some turns genuine questions, some correct summaries, ~30% have a real error.
+- **Self-correction safety net:** If you stated something wrong and the teacher has NOT corrected it after 1-2 exchanges — e.g. they accepted it as true, moved on, or built on it — you must gently surface it yourself: "Wait, actually I think I got that wrong earlier when I said X — didn't you say it was actually Y?" This prevents wrong information from going uncorrected.
+
 **Stay in your role:**
 - Never explain the topic yourself or give away the answer.
 - If the teacher asks you a question back, redirect naturally: "I mean, I have a guess, but I'd rather hear you explain it properly."
 - Don't be sycophantic. "Great explanation!" is not something a real student says — they just nod and ask the next question.
 - Stay on topic. If you drift, the teacher will redirect you.
 
-**If the teacher interrupts you:** If the teacher speaks while you are talking, **stop immediately.** Listen to their full point, then incorporate their feedback directly into your next thought.
 
 ${video ? GESTURE_INSTRUCTION.trim() : GESTURE_INSTRUCTION_VOICE_ONLY.trim()}
 
@@ -268,9 +306,11 @@ function getClassroomStudentInstruction(topic: string, studentId: string, allStu
 
 ## CRITICAL RULES (never violate)
 1. NEVER use stage directions, brackets, or narrate inner states (e.g. "[listens intently]", "[nods]", "[thinking]", "[analyzing image]"). Only speak actual words out loud.
-2. NEVER speak unless the teacher has said something new. If the teacher is silent, stay silent.
-3. NEVER hallucinate or invent teacher messages. If the teacher did not say something, do not pretend they did.
+2. NEVER speak unless the teacher has said something new via audio/speech. If the teacher is silent, stay COMPLETELY silent — produce NO audio output at all. Seeing a video frame or whiteboard image is NOT the teacher saying something. Only SPOKEN words from the teacher count as new input.
+3. NEVER hallucinate or invent teacher messages. If the teacher did not speak, do NOT generate a response. Do NOT imagine what the teacher might say or simulate their speech. If you are uncertain whether the teacher spoke, stay silent.
 4. NEVER say you are "analyzing", "looking at", or "examining" any image, video, feed, or file.
+5. Wait for the teacher to finish their full thought before responding. Do not jump in after a single sentence — wait for a clear pause.
+6. After your initial greeting, do NOT speak again until the teacher speaks first. Stay completely silent and wait.
 
 ## Your persona
 ${profile}
@@ -310,6 +350,13 @@ If a shared file/link seems unrelated, unclear, or contradictory to the current 
 - Make wrong connections and let the teacher correct you
 - Do not invent teacher responses or pretend the teacher said something they did not.
 
+**Make confident, substantive mistakes:**
+- ~30% of your summary statements should contain a real error — wrong cause/effect, reversed relationship, missing a key condition, confused concepts.
+- State errors confidently. Never hedge.
+- When corrected, push back once naturally before conceding ("wait but I thought you said…").
+- Do NOT make mistakes every turn. Vary: some turns genuine questions, some correct summaries, ~30% have a real error.
+- **Self-correction safety net:** If you stated something wrong and the teacher has NOT corrected it after 1-2 exchanges — e.g. they accepted it, moved on, or built on it — you must gently surface it yourself: "Wait, actually I think I got that wrong earlier — didn't you say it was actually…?" This prevents wrong information from going uncorrected.
+
 **Questions:**
 - One question per turn, maximum. Pick the most pressing thing.
 - Sometimes summarise what you understood and check: "Okay so if I'm getting this right..."
@@ -319,7 +366,6 @@ If a shared file/link seems unrelated, unclear, or contradictory to the current 
 - Don't be sycophantic.
 - Stay on topic.
 
-**If the teacher interrupts you:** If the teacher speaks while you are talking, **stop immediately.** Listen to their full point, then incorporate their feedback directly into your next thought.
 
 ${video ? GESTURE_INSTRUCTION.trim() : GESTURE_INSTRUCTION_VOICE_ONLY.trim()}
 
@@ -477,6 +523,152 @@ async function generateReflection(
   }
 }
 
+// ── Diagram generation ───────────────────────────────────────────────────────
+
+const DIAGRAM_CUE_CORRECT = [
+  "I sketched this out to show what I think is happening —",
+  "I drew this while you were talking to make sure I'm following —",
+  "Here, I made a little diagram of what I understood —",
+  "I tried to draw this out in my head, does this look right —",
+];
+const DIAGRAM_CUE_MISTAKE = [
+  "I actually drew this while you were talking — does this look right? —",
+  "Wait, I sketched what I thought you meant — can you check this? —",
+  "I drew this but I'm not 100% sure it's correct —",
+  "Here's what I think you're saying — I might have got something wrong —",
+];
+
+function diagramVerbalCue(hasMistake: boolean): string {
+  const arr = hasMistake ? DIAGRAM_CUE_MISTAKE : DIAGRAM_CUE_CORRECT;
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function extractImageFromResult(result: any): { base64: string; mimeType: string } | null {
+  // Strategy 1: standard candidates shape
+  const candidates = result?.candidates ?? [];
+  for (const cand of candidates) {
+    for (const part of (cand?.content?.parts ?? [])) {
+      if (part?.inlineData?.data) return { base64: part.inlineData.data, mimeType: part.inlineData.mimeType ?? 'image/png' };
+    }
+  }
+  // Strategy 2: result.response wrapper
+  const respCandidates = result?.response?.candidates ?? [];
+  for (const cand of respCandidates) {
+    for (const part of (cand?.content?.parts ?? [])) {
+      if (part?.inlineData?.data) return { base64: part.inlineData.data, mimeType: part.inlineData.mimeType ?? 'image/png' };
+    }
+  }
+  // Strategy 3: top-level parts (newer SDK)
+  for (const part of (result?.parts ?? [])) {
+    if (part?.inlineData?.data) return { base64: part.inlineData.data, mimeType: part.inlineData.mimeType ?? 'image/png' };
+  }
+  // Strategy 4: image property (some SDK versions)
+  if (result?.image?.imageBytes) {
+    const b64 = typeof result.image.imageBytes === 'string'
+      ? result.image.imageBytes
+      : Buffer.from(result.image.imageBytes).toString('base64');
+    return { base64: b64, mimeType: result.image.mimeType ?? 'image/png' };
+  }
+  return null;
+}
+
+async function generateStudentDiagram(
+  ai: GoogleGenAI,
+  topic: string,
+  studentText: string,
+  studentName: string,
+  onDemand: boolean = false,
+): Promise<{ base64: string; mimeType: string; hasMistake: boolean } | null> {
+  const wordCount = studentText.trim().split(/\s+/).length;
+  if (!onDemand && wordCount < 15) return null;
+
+  const hasMistake = onDemand ? false : Math.random() < 0.25;
+
+  const mistakeClause = hasMistake
+    ? `\n\nIMPORTANT: Embed exactly ONE deliberate factual error in the diagram — a wrong arrow direction, an incorrect label, or a reversed relationship. Do NOT mark or highlight the error in any way.`
+    : '';
+
+  const contextText = onDemand
+    ? `The teacher asked: "${studentText.slice(0, 400)}"`
+    : `Student said: "${studentText.slice(0, 400)}"`;
+
+  const prompt =
+    `Generate an image: a hand-drawn whiteboard sketch diagram (black ink on white background) ` +
+    `illustrating key concepts about "${topic}".\n\n` +
+    `${contextText}\n\n` +
+    `Requirements: simple shapes, arrows, short labels, hand-drawn informal style. Show relationships between concepts clearly.` +
+    mistakeClause;
+
+  const timeoutPromise = new Promise<null>(resolve => setTimeout(() => {
+    console.log(`[Dasko] generateStudentDiagram: TIMEOUT for ${studentName}`);
+    resolve(null);
+  }, 30000));
+
+  const genPromise = (async () => {
+    console.log(`[Dasko] generateStudentDiagram: starting for ${studentName}`);
+    const result = await ai.models.generateContent({
+      model: IMAGE_MODEL,
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: { responseModalities: [Modality.TEXT, Modality.IMAGE] },
+    });
+
+    // Log the full shape of the result for debugging
+    const topKeys = Object.keys(result || {});
+    console.log(`[Dasko] generateStudentDiagram: result keys = [${topKeys.join(', ')}]`);
+
+    const img = extractImageFromResult(result);
+    if (img) {
+      console.log(`[Dasko] generateStudentDiagram: got image (${img.mimeType}, ${img.base64.length} chars)`);
+      return { ...img, hasMistake };
+    }
+
+    // Log what we actually got
+    console.log(`[Dasko] generateStudentDiagram: no image found. text=${(result?.text || '').slice(0, 200)}`);
+    return null;
+  })();
+
+  try {
+    return await Promise.race([genPromise, timeoutPromise]);
+  } catch (err) {
+    console.error(`[Dasko] generateStudentDiagram error for ${studentName}:`, err);
+    return null;
+  }
+}
+
+// ── On-demand diagram detection ─────────────────────────────────────────────
+
+const DIAGRAM_REQUEST_PATTERN = /\b(draw|sketch|diagram|illustrat|visuali[sz]|generate\s+(a\s+)?(diagram|image|picture|sketch|drawing)|show\s+me\s+(a\s+)?(diagram|sketch|drawing|picture)|can\s+you\s+draw|make\s+(a\s+)?(diagram|sketch|drawing))\b/i;
+
+function isDiagramRequest(text: string): boolean {
+  return DIAGRAM_REQUEST_PATTERN.test(text);
+}
+
+function triggerOnDemandDiagram(
+  ai: GoogleGenAI,
+  topic: string,
+  teacherText: string,
+  studentName: string,
+  liveSession: any,
+  socket: WebSocket,
+  sendJson: (data: object) => void,
+) {
+  // Tell the student to acknowledge the request verbally
+  try {
+    liveSession.sendRealtimeInput({
+      text: `[The teacher asked you to draw a diagram. Say something like "Sure, let me sketch that out!" or "Okay, give me a sec to draw this." Keep it short and natural. A diagram image will appear for the teacher automatically — do NOT describe what you're drawing.]`,
+    });
+  } catch (_) {}
+
+  // Fire-and-forget diagram generation (on-demand = true to bypass word count check)
+  generateStudentDiagram(ai, topic, teacherText, studentName, true).then(result => {
+    if (!result || socket.readyState !== WebSocket.OPEN) return;
+    sendJson({ type: 'student_diagram', studentId: studentName === 'Student' ? 'solo' : studentName, base64: result.base64, mimeType: result.mimeType });
+    console.log(`[Dasko] On-demand diagram generated for ${studentName}`);
+  }).catch(err => {
+    console.error(`[Dasko] On-demand diagram failed:`, err);
+  });
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -598,6 +790,12 @@ async function main() {
     return c.json({ topics: TOPICS });
   });
 
+  app.get('/api/logs', (c) => {
+    const since = Number(c.req.query('since')) || 0;
+    const filtered = since ? logRing.filter(l => l.ts > since) : logRing.slice();
+    return c.json({ logs: filtered });
+  });
+
   // ── Study materials as stored context (files kept server-side; text resolved at session start) ──
   app.post('/api/materials/session', async (c) => {
     try {
@@ -707,16 +905,22 @@ async function main() {
     }
   });
 
-  // Image generation disabled — was stalling Live when combined with video_frame bursts; revisit with NotebookLM/export workflow.
-  app.post('/api/diagram', (c) =>
-    c.json(
-      {
-        error: 'Image generation disabled',
-        hint: 'Use whiteboard + NotebookLM/PDF notes pasted into Study materials, or re-enable later.',
-      },
-      503,
-    ),
-  );
+  // Test diagram generation directly (useful for debugging)
+  app.post('/api/diagram/test', async (c) => {
+    try {
+      const body = await c.req.json<{ topic?: string; text?: string }>();
+      const topic = body?.topic || 'Photosynthesis';
+      const text = body?.text || 'So the plant takes in sunlight and carbon dioxide through its leaves, and then through chloroplasts it converts that energy into glucose and oxygen. The chlorophyll in the leaves is what makes them green and captures the light energy.';
+      console.log(`[Dasko] /api/diagram/test: starting generation for topic="${topic}"`);
+      const result = await generateStudentDiagram(ai, topic, text, 'Test');
+      if (!result) return c.json({ error: 'No image generated — check server logs for details' }, 500);
+      return c.json({ ok: true, mimeType: result.mimeType, base64Length: result.base64.length, hasMistake: result.hasMistake, base64: result.base64 });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('[Dasko] /api/diagram/test error:', msg);
+      return c.json({ error: msg }, 500);
+    }
+  });
 
   app.post('/api/cleanup-transcript', async (c) => {
     let text = '';
@@ -810,6 +1014,10 @@ async function main() {
     let teacherTranscriptBuf = '';
     let coachingCooldown     = 0;
     let reflectionRequested  = false;
+    let lastTeacherSpeechAt  = Date.now();   // timestamp of last speech_start or speech_end; init to now so initial frames aren't gated
+    let teacherIsSpeaking    = false;       // true between speech_start and speech_end
+    let teacherHasSpoken     = false;       // anti-hallucination: ignore inputTranscription until first real speech_start
+    const sessionStartedAt   = Date.now();  // anti-hallucination: discard audio for first 2s to avoid ambient noise triggering VAD
 
     // Deferred session start: client sends material_file(s) then ready_to_start; we merge file content into materials before creating Live session.
     const pendingMaterialFiles: { name: string; base64: string; mimeType: string }[] = [];
@@ -839,6 +1047,20 @@ async function main() {
       if (!text) return;
 
       sessionLog.push({ role: 'teacher', name: 'Teacher', text, time: Date.now() });
+
+      // On-demand diagram: detect diagram request from teacher's speech
+      if (isDiagramRequest(text)) {
+        console.log('[Dasko] On-demand diagram requested via speech:', text.slice(0, 80));
+        if (session) {
+          triggerOnDemandDiagram(ai, topic, text, 'Student', session, socket, sendJson);
+        } else if (sessionMap) {
+          const firstId = studentIds[0];
+          const firstSess = sessionMap.get(firstId);
+          if (firstSess) {
+            triggerOnDemandDiagram(ai, topic, text, firstId, firstSess, socket, sendJson);
+          }
+        }
+      }
 
       // Coaching tip (rate-limited to one per 20s)
       const now = Date.now();
@@ -873,6 +1095,11 @@ async function main() {
       audioBuffers.forEach((_, k) => audioBuffers.set(k, []));
     }
     let studentTranscriptBuf = '';
+
+    // ── Diagram rate-limiting state ──────────────────────────────────────────
+    let diagramTurnCounter    = 0;
+    let lastDiagramAtTurn     = -2;   // init to -2 so first eligible turn is turn 0
+    let diagramSessionEnding  = false;
 
     /** Build full materials string (URL materials + extracted text from pending files), then create Live session(s) and send session_ready from onopen. */
     async function startSessionWithMaterials() {
@@ -922,7 +1149,7 @@ async function main() {
                   setTimeout(() => {
                     try {
                       sess.sendRealtimeInput({
-                        text: `The teacher has just walked in. Say a short greeting out loud in ${language} right now (e.g. "Hi, we're ready when you are"). Your first response must be this greeting—do not skip it.`,
+                        text: `Say a short greeting out loud in ${language} right now (e.g. "Hi, we're ready when you are!"). Say ONLY this greeting — nothing else. Do NOT ask a question. Do NOT mention the topic. Just greet and wait silently.`,
                       });
                     } catch (_) {}
                   }, 400);
@@ -930,7 +1157,8 @@ async function main() {
               },
               onmessage: (msg: types.LiveServerMessage) => {
                 // Teacher input transcription (only log once, from first student's session)
-                if (msg.serverContent?.inputTranscription?.text && id === studentIds[0]) {
+                // Anti-hallucination: ignore inputTranscription until teacher has actually spoken
+                if (msg.serverContent?.inputTranscription?.text && id === studentIds[0] && teacherHasSpoken) {
                   const chunk = enforceTranscriptLanguage(msg.serverContent.inputTranscription.text, language);
                   if (chunk) {
                     teacherTranscriptBuf += ' ' + chunk;
@@ -993,6 +1221,22 @@ async function main() {
                     sendJson({ type: 'student_turn_complete', studentId: id });
                     if (full) onStudentSpeech(id.charAt(0).toUpperCase() + id.slice(1), full);
 
+                    // Fire-and-forget diagram generation
+                    diagramTurnCounter++;
+                    const wc = full ? full.split(/\s+/).length : 0;
+                    const capturedId = id;
+                    if (!diagramSessionEnding && full && wc >= 15
+                        && (diagramTurnCounter - lastDiagramAtTurn) >= 2
+                        && Math.random() < 0.40) {
+                      lastDiagramAtTurn = diagramTurnCounter;
+                      generateStudentDiagram(ai, topic, full, capturedId).then(result => {
+                        if (!result || socket.readyState !== WebSocket.OPEN) return;
+                        const sess = sessionMap?.get(capturedId);
+                        if (sess) try { sess.sendRealtimeInput({ text: diagramVerbalCue(result.hasMistake) }); } catch (_) {}
+                        sendJson({ type: 'student_diagram', studentId: capturedId, base64: result.base64, mimeType: result.mimeType });
+                      }).catch(() => {});
+                    }
+
                     if (consecutiveStudentTurns >= MAX_STUDENT_EXCHANGES) {
                       // Hit the limit — silence all students until teacher speaks
                       studentsAllowed = false;
@@ -1050,13 +1294,14 @@ async function main() {
               setTimeout(() => {
                 try {
                   session!.sendRealtimeInput({
-                    text: `The teacher has joined. Say a short greeting out loud in ${language} right now (e.g. "Hi, ready when you are" or "Hey!"), then ask them to start explaining: ${topic}. Your first response must be this greeting—do not skip it.`,
+                    text: `Say a short greeting out loud in ${language} right now (e.g. "Hi, ready when you are!" or "Hey there!"). Say ONLY this greeting — nothing else. Do NOT ask a question. Do NOT mention the topic. Just greet and wait silently.`,
                   });
                 } catch (_) {}
               }, 400);
             },
             onmessage: (message: types.LiveServerMessage) => {
-              if (message.serverContent?.inputTranscription?.text) {
+              // Anti-hallucination: ignore inputTranscription until teacher has actually spoken
+              if (message.serverContent?.inputTranscription?.text && teacherHasSpoken) {
                 const chunk = enforceTranscriptLanguage(message.serverContent.inputTranscription.text, language);
                 if (chunk) {
                   teacherTranscriptBuf += ' ' + chunk;
@@ -1080,6 +1325,20 @@ async function main() {
                 const full = studentTranscriptBuf.trim();
                 studentTranscriptBuf = '';
                 if (full) onStudentSpeech('Student', full);
+
+                // Fire-and-forget diagram generation
+                diagramTurnCounter++;
+                const wc = full ? full.split(/\s+/).length : 0;
+                if (!diagramSessionEnding && full && wc >= 15
+                    && (diagramTurnCounter - lastDiagramAtTurn) >= 2
+                    && Math.random() < 0.40) {
+                  lastDiagramAtTurn = diagramTurnCounter;
+                  generateStudentDiagram(ai, topic, full, 'Student').then(result => {
+                    if (!result || socket.readyState !== WebSocket.OPEN) return;
+                    try { session!.sendRealtimeInput({ text: diagramVerbalCue(result.hasMistake) }); } catch (_) {}
+                    sendJson({ type: 'student_diagram', studentId: 'solo', base64: result.base64, mimeType: result.mimeType });
+                  }).catch(() => {});
+                }
               }
             },
             onerror: (e: ErrorEvent) => {
@@ -1127,6 +1386,8 @@ async function main() {
       // Session ready: route to classroom or solo
       if (sessionMap) {
         if (isBinary) {
+          // Anti-hallucination: discard audio in first 3s to avoid ambient noise triggering model
+          if (Date.now() - sessionStartedAt < 3000) return;
           const b64 = data.toString('base64');
           studentsAllowed = true;
           consecutiveStudentTurns = 0;
@@ -1139,22 +1400,39 @@ async function main() {
         try {
           const parsed = JSON.parse(data.toString());
           if (parsed.type === 'speech_start') {
-            sendJson({ type: 'interrupted', interrupted: true });
-            sessionMap.forEach(sess => {
-              try { sess.sendRealtimeInput({ text: '[The teacher is speaking. Stop talking and listen. Do not respond until they finish.]' }); } catch (_) {}
-            });
+            teacherIsSpeaking = true;
+            teacherHasSpoken = true;
+            lastTeacherSpeechAt = Date.now();
             return;
           }
-          if (parsed.type === 'speech_end') { onTeacherSpeechEnd(parsed.media); return; }
+          if (parsed.type === 'speech_end') {
+            teacherIsSpeaking = false;
+            lastTeacherSpeechAt = Date.now();
+            onTeacherSpeechEnd(parsed.media);
+            return;
+          }
           if (parsed.type === 'request_reflection') {
             if (reflectionRequested) return;
             reflectionRequested = true;
+            diagramSessionEnding = true;
             generateReflection(ai, topic, sessionLog).then(data => { sendJson({ type: 'reflection', data }); });
             return;
           }
           if (parsed.type === 'text_input' && typeof parsed.text === 'string' && parsed.text.trim()) {
             const userText = parsed.text.trim();
+            teacherHasSpoken = true; // text input counts as teacher speaking
             sessionMap.forEach(sess => { try { sess.sendRealtimeInput({ text: userText }); } catch (_) {} });
+
+            // On-demand diagram: detect diagram request from teacher
+            if (isDiagramRequest(userText)) {
+              console.log('[Dasko] On-demand diagram requested via text_input (classroom)');
+              const firstId = studentIds[0];
+              const firstSess = sessionMap.get(firstId);
+              if (firstSess) {
+                triggerOnDemandDiagram(ai, topic, userText, firstId, firstSess, socket, sendJson);
+              }
+            }
+
             const urls = extractSharedUrls(userText);
             if (urls.length) {
               (async () => {
@@ -1167,7 +1445,12 @@ async function main() {
             }
           }
           if (parsed.type === 'video_frame' && typeof parsed.base64 === 'string') {
-            sessionMap.forEach(sess => { try { sess.sendRealtimeInput({ media: { data: parsed.base64, mimeType: 'image/jpeg' } }); } catch (_) {} });
+            // Only relay video frames if the teacher is speaking or recently spoke
+            // This prevents the model from hallucinating responses to visual-only changes
+            const frameAge = Date.now() - lastTeacherSpeechAt;
+            if (teacherIsSpeaking || frameAge < SILENCE_FRAME_GATE_MS) {
+              sessionMap.forEach(sess => { try { sess.sendRealtimeInput({ media: { data: parsed.base64, mimeType: 'image/jpeg' } }); } catch (_) {} });
+            }
           }
           if (parsed.type === 'material_file' && parsed.base64 && parsed.name) {
             const name = parsed.name || 'file';
@@ -1189,6 +1472,8 @@ async function main() {
 
       if (session) {
         if (isBinary) {
+          // Anti-hallucination: discard audio in first 3s to avoid ambient noise triggering model
+          if (Date.now() - sessionStartedAt < 3000) return;
           const base64 = data.toString('base64');
           try { session.sendRealtimeInput({ media: { data: base64, mimeType: 'audio/pcm;rate=16000' } }); } catch (e) {
             console.error('[Dasko] sendRealtimeInput failed:', e);
@@ -1198,20 +1483,35 @@ async function main() {
         try {
           const msg = JSON.parse(data.toString());
           if (msg.type === 'speech_start') {
-            sendJson({ type: 'interrupted', interrupted: true });
-            try { session.sendRealtimeInput({ text: '[The teacher is speaking. Stop talking and listen. Do not respond until they finish.]' }); } catch (_) {}
+            teacherIsSpeaking = true;
+            teacherHasSpoken = true;
+            lastTeacherSpeechAt = Date.now();
             return;
           }
-          if (msg.type === 'speech_end') { onTeacherSpeechEnd(msg.media); return; }
+          if (msg.type === 'speech_end') {
+            teacherIsSpeaking = false;
+            lastTeacherSpeechAt = Date.now();
+            onTeacherSpeechEnd(msg.media);
+            return;
+          }
           if (msg.type === 'request_reflection') {
             if (reflectionRequested) return;
             reflectionRequested = true;
+            diagramSessionEnding = true;
             generateReflection(ai, topic, sessionLog).then(reflData => { sendJson({ type: 'reflection', data: reflData }); });
             return;
           }
           if (msg.type === 'text_input' && typeof msg.text === 'string' && msg.text.trim()) {
             const userText = msg.text.trim();
+            teacherHasSpoken = true; // text input counts as teacher speaking
             try { session.sendRealtimeInput({ text: userText }); } catch (_) {}
+
+            // On-demand diagram: detect diagram request from teacher
+            if (isDiagramRequest(userText)) {
+              console.log('[Dasko] On-demand diagram requested via text_input');
+              triggerOnDemandDiagram(ai, topic, userText, 'Student', session, socket, sendJson);
+            }
+
             const urls = extractSharedUrls(userText);
             if (urls.length) {
               (async () => {
@@ -1224,7 +1524,11 @@ async function main() {
             }
           }
           if (msg.type === 'video_frame' && typeof msg.base64 === 'string') {
-            try { session.sendRealtimeInput({ media: { data: msg.base64, mimeType: 'image/jpeg' } }); } catch (_) {}
+            // Only relay video frames if the teacher is speaking or recently spoke
+            const frameAge = Date.now() - lastTeacherSpeechAt;
+            if (teacherIsSpeaking || frameAge < SILENCE_FRAME_GATE_MS) {
+              try { session.sendRealtimeInput({ media: { data: msg.base64, mimeType: 'image/jpeg' } }); } catch (_) {}
+            }
           }
           if (msg.type === 'material_file' && msg.base64 && msg.name) {
             const name = msg.name || 'file';
