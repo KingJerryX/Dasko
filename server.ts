@@ -529,24 +529,6 @@ async function generateReflection(
 
 // ── Diagram generation ───────────────────────────────────────────────────────
 
-const DIAGRAM_CUE_CORRECT = [
-  "I sketched this out to show what I think is happening —",
-  "I drew this while you were talking to make sure I'm following —",
-  "Here, I made a little diagram of what I understood —",
-  "I tried to draw this out in my head, does this look right —",
-];
-const DIAGRAM_CUE_MISTAKE = [
-  "I actually drew this while you were talking — does this look right? —",
-  "Wait, I sketched what I thought you meant — can you check this? —",
-  "I drew this but I'm not 100% sure it's correct —",
-  "Here's what I think you're saying — I might have got something wrong —",
-];
-
-function diagramVerbalCue(hasMistake: boolean): string {
-  const arr = hasMistake ? DIAGRAM_CUE_MISTAKE : DIAGRAM_CUE_CORRECT;
-  return arr[Math.floor(Math.random() * arr.length)];
-}
-
 function extractImageFromResult(result: any): { base64: string; mimeType: string } | null {
   // Strategy 1: standard candidates shape
   const candidates = result?.candidates ?? [];
@@ -597,10 +579,15 @@ async function generateStudentDiagram(
     : `Student said: "${studentText.slice(0, 400)}"`;
 
   const prompt =
-    `Generate an image: a hand-drawn whiteboard sketch diagram (black ink on white background) ` +
-    `illustrating key concepts about "${topic}".\n\n` +
+    `Generate an image: a quick, messy whiteboard doodle (black marker on white) about "${topic}".\n\n` +
     `${contextText}\n\n` +
-    `Requirements: simple shapes, arrows, short labels, hand-drawn informal style. Show relationships between concepts clearly.` +
+    `Style rules:\n` +
+    `- Maximum 3-5 short labels (1-3 words each, NO sentences)\n` +
+    `- Big simple shapes (circles, boxes, arrows) — like a student's quick doodle\n` +
+    `- Lots of white space — do NOT fill the image\n` +
+    `- Hand-drawn, imperfect, slightly crooked lines\n` +
+    `- NO paragraphs, NO bullet points, NO detailed text\n` +
+    `- Think: what a student scribbles in 15 seconds on a whiteboard` +
     mistakeClause;
 
   const timeoutPromise = new Promise<null>(resolve => setTimeout(() => {
@@ -641,10 +628,17 @@ async function generateStudentDiagram(
 
 // ── On-demand diagram detection ─────────────────────────────────────────────
 
-const DIAGRAM_REQUEST_PATTERN = /\b(diagram|illustrat|visuali[sz]|generate\s+(a\s+)?(diagram|image|picture)|show\s+me\s+(a\s+)?(diagram|picture)|make\s+(a\s+)?(diagram))\b/i;
+const DIAGRAM_REQUEST_PATTERN = /\b(draw|sketch|diagram|illustrat|visuali[sz]|generate\s+(a\s+)?(diagram|image|picture|sketch|drawing)|show\s+me\s+(a\s+)?(diagram|sketch|drawing|picture)|can\s+you\s+draw|make\s+(a\s+)?(diagram|sketch|drawing))\b/i;
 
 function isDiagramRequest(text: string): boolean {
   return DIAGRAM_REQUEST_PATTERN.test(text);
+}
+
+// ── Vision refresh detection ────────────────────────────────────────────────
+const VISION_REFRESH_PATTERN = /\b(can you see|do you see|what do you see|look at this|are you seeing|are you looking|what am i showing)\b/i;
+
+function isVisionRefreshRequest(text: string): boolean {
+  return VISION_REFRESH_PATTERN.test(text);
 }
 
 function triggerOnDemandDiagram(
@@ -668,6 +662,12 @@ function triggerOnDemandDiagram(
     if (!result || socket.readyState !== WebSocket.OPEN) return;
     sendJson({ type: 'student_diagram', studentId: studentName === 'Student' ? 'solo' : studentName, base64: result.base64, mimeType: result.mimeType });
     console.log(`[Dasko] On-demand diagram generated for ${studentName}`);
+
+    // Send the diagram image to the Live session so the student can "see" its own diagram
+    try {
+      liveSession.sendRealtimeInput({ media: { data: result.base64, mimeType: result.mimeType } });
+      liveSession.sendRealtimeInput({ text: '[You just drew this diagram on the whiteboard. The teacher can see it and may draw on it or point at parts of it.]' });
+    } catch (_) {}
   }).catch(err => {
     console.error(`[Dasko] On-demand diagram failed:`, err);
   });
@@ -1066,6 +1066,12 @@ async function main() {
         }
       }
 
+      // Vision refresh: detect "can you see..." requests
+      if (isVisionRefreshRequest(text)) {
+        console.log('[Dasko] Vision refresh requested via speech:', text.slice(0, 80));
+        sendJson({ type: 'request_screenshot' });
+      }
+
       // Coaching tip (rate-limited to one per 10s)
       const now = Date.now();
       if (now > coachingCooldown) {
@@ -1100,10 +1106,8 @@ async function main() {
     }
     let studentTranscriptBuf = '';
 
-    // ── Diagram rate-limiting state ──────────────────────────────────────────
-    let diagramTurnCounter    = 0;
-    let lastDiagramAtTurn     = -2;   // init to -2 so first eligible turn is turn 0
-    let diagramSessionEnding  = false;
+    // (Diagram generation is on-demand only — no auto-generation state needed)
+    let diagramPopupOpen = false; // when true, skip regular video frames (diagram frames take priority)
 
     /** Build full materials string (URL materials + extracted text from pending files), then create Live session(s) and send session_ready from onopen. */
     async function startSessionWithMaterials() {
@@ -1231,22 +1235,6 @@ async function main() {
                     sendJson({ type: 'student_turn_complete', studentId: id });
                     if (full) onStudentSpeech(id.charAt(0).toUpperCase() + id.slice(1), full);
 
-                    // Fire-and-forget diagram generation
-                    diagramTurnCounter++;
-                    const wc = full ? full.split(/\s+/).length : 0;
-                    const capturedId = id;
-                    if (!diagramSessionEnding && full && wc >= 15
-                        && (diagramTurnCounter - lastDiagramAtTurn) >= 2
-                        && Math.random() < 0.40) {
-                      lastDiagramAtTurn = diagramTurnCounter;
-                      generateStudentDiagram(ai, topic, full, capturedId).then(result => {
-                        if (!result || socket.readyState !== WebSocket.OPEN) return;
-                        const sess = sessionMap?.get(capturedId);
-                        if (sess) try { sess.sendRealtimeInput({ text: diagramVerbalCue(result.hasMistake) }); } catch (_) {}
-                        sendJson({ type: 'student_diagram', studentId: capturedId, base64: result.base64, mimeType: result.mimeType });
-                      }).catch(() => {});
-                    }
-
                     if (consecutiveStudentTurns >= MAX_STUDENT_EXCHANGES) {
                       // Hit the limit — silence all students until teacher speaks
                       studentsAllowed = false;
@@ -1335,20 +1323,6 @@ async function main() {
                 const full = studentTranscriptBuf.trim();
                 studentTranscriptBuf = '';
                 if (full) onStudentSpeech('Student', full);
-
-                // Fire-and-forget diagram generation
-                diagramTurnCounter++;
-                const wc = full ? full.split(/\s+/).length : 0;
-                if (!diagramSessionEnding && full && wc >= 15
-                    && (diagramTurnCounter - lastDiagramAtTurn) >= 2
-                    && Math.random() < 0.40) {
-                  lastDiagramAtTurn = diagramTurnCounter;
-                  generateStudentDiagram(ai, topic, full, 'Student').then(result => {
-                    if (!result || socket.readyState !== WebSocket.OPEN) return;
-                    try { session!.sendRealtimeInput({ text: diagramVerbalCue(result.hasMistake) }); } catch (_) {}
-                    sendJson({ type: 'student_diagram', studentId: 'solo', base64: result.base64, mimeType: result.mimeType });
-                  }).catch(() => {});
-                }
               }
             },
             onerror: (e: ErrorEvent) => {
@@ -1424,7 +1398,7 @@ async function main() {
           if (parsed.type === 'request_reflection') {
             if (reflectionRequested) return;
             reflectionRequested = true;
-            diagramSessionEnding = true;
+
             generateReflection(ai, topic, sessionLog).then(data => { sendJson({ type: 'reflection', data }); });
             return;
           }
@@ -1441,6 +1415,12 @@ async function main() {
               if (firstSess) {
                 triggerOnDemandDiagram(ai, topic, userText, firstId, firstSess, socket, sendJson);
               }
+            }
+
+            // Vision refresh: detect "can you see..." requests
+            if (isVisionRefreshRequest(userText)) {
+              console.log('[Dasko] Vision refresh requested via text_input (classroom)');
+              sendJson({ type: 'request_screenshot' });
             }
 
             const urls = extractSharedUrls(userText);
@@ -1470,12 +1450,32 @@ async function main() {
             }
           }
           if (parsed.type === 'video_frame' && typeof parsed.base64 === 'string') {
+            // Skip regular video frames when diagram popup is open (diagram frames take priority)
+            if (diagramPopupOpen) return;
             // Only relay video frames if the teacher is speaking or recently spoke
-            // This prevents the model from hallucinating responses to visual-only changes
             const frameAge = Date.now() - lastTeacherSpeechAt;
             if (teacherIsSpeaking || frameAge < SILENCE_FRAME_GATE_MS) {
               sessionMap.forEach(sess => { try { sess.sendRealtimeInput({ media: { data: parsed.base64, mimeType: 'image/jpeg' } }); } catch (_) {} });
             }
+          }
+          // Diagram annotation frames — no speech gating (teacher is actively drawing)
+          if (parsed.type === 'diagram_frame' && typeof parsed.base64 === 'string') {
+            sessionMap.forEach(sess => {
+              try { sess.sendRealtimeInput({ media: { data: parsed.base64, mimeType: 'image/jpeg' } }); } catch (_) {}
+            });
+          }
+          // Diagram popup open/close state
+          if (parsed.type === 'diagram_popup_open')   { diagramPopupOpen = true; }
+          if (parsed.type === 'diagram_popup_closed')  { diagramPopupOpen = false; }
+          // Vision refresh screenshot — bypasses all gating, additive to session context
+          if (parsed.type === 'vision_screenshot' && typeof parsed.base64 === 'string') {
+            const note = '[The teacher asked if you can see something. Here is a fresh screenshot of everything visible on screen right now. Look at it carefully and describe what you see. You still remember everything from the conversation so far.]';
+            sessionMap.forEach(sess => {
+              try {
+                sess.sendRealtimeInput({ media: { data: parsed.base64, mimeType: 'image/jpeg' } });
+                sess.sendRealtimeInput({ text: note });
+              } catch (_) {}
+            });
           }
           if (parsed.type === 'material_file' && parsed.base64 && parsed.name) {
             const name = parsed.name || 'file';
@@ -1522,7 +1522,7 @@ async function main() {
           if (msg.type === 'request_reflection') {
             if (reflectionRequested) return;
             reflectionRequested = true;
-            diagramSessionEnding = true;
+
             generateReflection(ai, topic, sessionLog).then(reflData => { sendJson({ type: 'reflection', data: reflData }); });
             return;
           }
@@ -1535,6 +1535,12 @@ async function main() {
             if (isDiagramRequest(userText)) {
               console.log('[Dasko] On-demand diagram requested via text_input');
               triggerOnDemandDiagram(ai, topic, userText, 'Student', session, socket, sendJson);
+            }
+
+            // Vision refresh: detect "can you see..." requests
+            if (isVisionRefreshRequest(userText)) {
+              console.log('[Dasko] Vision refresh requested via text_input');
+              sendJson({ type: 'request_screenshot' });
             }
 
             const urls = extractSharedUrls(userText);
@@ -1563,11 +1569,28 @@ async function main() {
             }
           }
           if (msg.type === 'video_frame' && typeof msg.base64 === 'string') {
+            // Skip regular video frames when diagram popup is open (diagram frames take priority)
+            if (diagramPopupOpen) return;
             // Only relay video frames if the teacher is speaking or recently spoke
             const frameAge = Date.now() - lastTeacherSpeechAt;
             if (teacherIsSpeaking || frameAge < SILENCE_FRAME_GATE_MS) {
               try { session.sendRealtimeInput({ media: { data: msg.base64, mimeType: 'image/jpeg' } }); } catch (_) {}
             }
+          }
+          // Diagram annotation frames — no speech gating
+          if (msg.type === 'diagram_frame' && typeof msg.base64 === 'string') {
+            try { session.sendRealtimeInput({ media: { data: msg.base64, mimeType: 'image/jpeg' } }); } catch (_) {}
+          }
+          // Diagram popup open/close state
+          if (msg.type === 'diagram_popup_open')   { diagramPopupOpen = true; }
+          if (msg.type === 'diagram_popup_closed')  { diagramPopupOpen = false; }
+          // Vision refresh screenshot — bypasses all gating, additive to session context
+          if (msg.type === 'vision_screenshot' && typeof msg.base64 === 'string') {
+            const note = '[The teacher asked if you can see something. Here is a fresh screenshot of everything visible on screen right now. Look at it carefully and describe what you see. You still remember everything from the conversation so far.]';
+            try {
+              session.sendRealtimeInput({ media: { data: msg.base64, mimeType: 'image/jpeg' } });
+              session.sendRealtimeInput({ text: note });
+            } catch (_) {}
           }
           if (msg.type === 'material_file' && msg.base64 && msg.name) {
             const name = msg.name || 'file';

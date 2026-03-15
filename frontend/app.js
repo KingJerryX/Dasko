@@ -171,6 +171,13 @@ const compositeCanvas = document.createElement("canvas");
 compositeCanvas.width = 640;
 compositeCanvas.height = 360;
 
+// Diagram frame streaming (annotations → AI vision)
+let diagramFrameInterval = null;
+let diagramPopupOpen = false;
+let lastDiagramDrawTime = 0;
+const DIAGRAM_FRAME_INTERVAL_MS = 2000;
+const DIAGRAM_DRAW_WINDOW_MS = 4000;
+
 // Transcript
 let transcriptEntryId = 0;
 let currentTeacherEntry = null;
@@ -2287,6 +2294,11 @@ async function connect() {
         disconnect(true);
         showReflection(msg.data);
       }
+
+      // Vision refresh: server requests a full-page screenshot
+      if (msg.type === "request_screenshot") {
+        captureAndSendScreenshot();
+      }
     } catch (_) {}
   };
 }
@@ -2548,6 +2560,81 @@ if (sessionHomeBtn) {
   });
 })();
 
+// ── Diagram frame streaming + vision refresh ────────────────────────────────
+
+function startDiagramFrameSending() {
+  if (diagramFrameInterval) clearInterval(diagramFrameInterval);
+  diagramFrameInterval = setInterval(() => {
+    if (!diagramPopupOpen) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    // Only send if teacher drew recently
+    if (Date.now() - lastDiagramDrawTime > DIAGRAM_DRAW_WINDOW_MS) return;
+    const canvas = document.getElementById("diagramCanvas");
+    if (!canvas) return;
+    const base64 = canvas.toDataURL("image/jpeg", 0.5).split(",")[1];
+    try { ws.send(JSON.stringify({ type: "diagram_frame", base64 })); } catch (_) {}
+  }, DIAGRAM_FRAME_INTERVAL_MS);
+}
+
+function stopDiagramFrameSending() {
+  if (diagramFrameInterval) { clearInterval(diagramFrameInterval); diagramFrameInterval = null; }
+}
+
+function captureAndSendScreenshot() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const shotCanvas = document.createElement("canvas");
+  shotCanvas.width = 1280;
+  shotCanvas.height = 720;
+  const ctx = shotCanvas.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, 1280, 720);
+
+  // Draw screen share (full area)
+  const screenEl = document.getElementById("screenFeed");
+  if (screenEl && screenEl.srcObject) {
+    try { ctx.drawImage(screenEl, 0, 0, 1280, 720); } catch (_) {}
+  }
+  // Draw whiteboard
+  const wbCanvas = document.getElementById("whiteboardCanvas");
+  if (wbCanvas && wbCanvas.width > 0) {
+    ctx.save();
+    ctx.globalAlpha = screenEl && screenEl.srcObject ? 0.5 : 1.0;
+    try { ctx.drawImage(wbCanvas, 0, 0, 1280, 720); } catch (_) {}
+    ctx.restore();
+  }
+  // Draw camera PiP
+  const camEl = document.getElementById("cameraPipFeed") || document.getElementById("cameraFeed");
+  if (camEl && camEl.srcObject) {
+    try {
+      const r = 100;
+      const x = 1280 - r * 2 - 24;
+      const y = 720 - r * 2 - 24;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(x + r, y + r, r, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.drawImage(camEl, x, y, r * 2, r * 2);
+      ctx.restore();
+    } catch (_) {}
+  }
+  // If diagram popup is open, include it
+  const diagCanvas = document.getElementById("diagramCanvas");
+  const diagPopup = document.getElementById("diagramPopup");
+  if (diagPopup && diagPopup.classList.contains("visible") && diagCanvas) {
+    const dw = 480, dh = 360;
+    ctx.strokeStyle = "#E5E7EB";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(0, 720 - dh, dw, dh);
+    try { ctx.drawImage(diagCanvas, 0, 720 - dh, dw, dh); } catch (_) {}
+    ctx.font = "14px Inter, sans-serif";
+    ctx.fillStyle = "#374151";
+    ctx.fillText("Student Diagram (with annotations)", 8, 720 - dh + 16);
+  }
+
+  const base64 = shotCanvas.toDataURL("image/jpeg", 0.7).split(",")[1];
+  try { ws.send(JSON.stringify({ type: "vision_screenshot", base64 })); } catch (_) {}
+}
+
 // ── Diagram popup ─────────────────────────────────────────────────────────────
 (function () {
   const popup          = document.getElementById("diagramPopup");
@@ -2628,7 +2715,15 @@ if (sessionHomeBtn) {
 
   // ── Close / fullscreen ──────────────────────────────────────────────────────
   if (closeBtn) {
-    closeBtn.addEventListener("click", () => popup.classList.remove("visible"));
+    closeBtn.addEventListener("click", () => {
+      popup.classList.remove("visible");
+      diagramPopupOpen = false;
+      stopDiagramFrameSending();
+      // Notify server that diagram popup is closed
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try { ws.send(JSON.stringify({ type: "diagram_popup_closed" })); } catch (_) {}
+      }
+    });
   }
   if (fullscreenBtn) {
     fullscreenBtn.addEventListener("click", () => {
@@ -2662,6 +2757,7 @@ if (sessionHomeBtn) {
   function onDiagStart(e) {
     e.preventDefault();
     e.stopPropagation();
+    lastDiagramDrawTime = Date.now(); // track for annotation streaming
     const { x, y } = getCanvasPos(e);
     if (diagTool === "text") {
       const input = prompt("Enter text:");
@@ -2682,6 +2778,7 @@ if (sessionHomeBtn) {
   function onDiagMove(e) {
     e.preventDefault();
     if (!diagDrawing) return;
+    lastDiagramDrawTime = Date.now(); // track for annotation streaming
     const { x, y } = getCanvasPos(e);
     ctx.lineJoin = "round";
     ctx.lineCap  = "round";
@@ -2801,6 +2898,14 @@ if (sessionHomeBtn) {
     fullscreenBtn.textContent = "\u26F6";
     setDiagTool("pen");
     await loadDiagramIntoCanvas(base64, mimeType || "image/png");
+
+    // Start diagram annotation streaming
+    diagramPopupOpen = true;
+    startDiagramFrameSending();
+    // Notify server that diagram popup is open (pause regular video frames)
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: "diagram_popup_open" })); } catch (_) {}
+    }
   }
 
   // ── Public: show thumbnail card in transcript ───────────────────────────────
