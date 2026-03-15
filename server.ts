@@ -19,6 +19,14 @@ import {
 
 dotenv.config();
 
+// ── Cloud Run crash prevention: catch unhandled errors so the process stays alive ──
+process.on('uncaughtException', (err) => {
+  console.error('[Dasko] UNCAUGHT EXCEPTION (process kept alive):', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[Dasko] UNHANDLED REJECTION (process kept alive):', reason);
+});
+
 // ── Server log capture (ring buffer for /api/logs) ──────────────────────────
 const LOG_RING_MAX = 500;
 const logRing: { ts: number; level: string; msg: string }[] = [];
@@ -1029,8 +1037,12 @@ async function main() {
     const MAX_MATERIALS_CHARS = 30_000;
 
     function sendJson(data: object) {
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify(data));
+      try {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify(data));
+        }
+      } catch (e) {
+        console.error('[Dasko] sendJson failed (socket may be closing):', e);
       }
     }
 
@@ -1195,8 +1207,8 @@ async function main() {
             callbacks: {
               onopen:  () => {
                 console.log(`[Dasko] ${id} session opened`);
-                sessionStartedAt = Date.now(); // reset so audio blackout window starts from Live session ready
                 if (id === studentIds[0]) {
+                  sessionStartedAt = Date.now(); // reset once — audio blackout window starts from first Live session ready
                   sendJson({ type: 'session_ready' });
                   sendJson({ type: 'info', message: `Your classroom is ready. Start explaining: ${topic}` });
                   setTimeout(() => {
@@ -1444,7 +1456,7 @@ async function main() {
     }
     }
 
-    socket.on('message', (data: Buffer, isBinary: boolean) => {
+    socket.on('message', (data: Buffer, isBinary: boolean) => { try {
       // Init phase: collect material_file(s), then on ready_to_start create session(s) with merged materials
       if (!sessionReady) {
         if (isBinary) return;
@@ -1721,7 +1733,7 @@ async function main() {
           }
         } catch (_) {}
       }
-    });
+    } catch (err) { console.error('[Dasko] Message handler error (connection kept alive):', err); } });
 
     socket.on('close', () => {
       console.log('[Dasko] Client disconnected');
