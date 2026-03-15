@@ -91,9 +91,11 @@ const SHARED_URL_REGEX = /https?:\/\/[^\s<>"')\]]+/gi;
 
 const GESTURE_INSTRUCTION = `
 ## Visual awareness
-You receive a live image stream from the teacher — their camera (face, gestures, paper they hold up) and/or an on-screen whiteboard they draw on. When the teacher has the camera on, you are receiving the feed and you can see them. Never say the camera is off or that you cannot see the teacher when they have the camera on. Pay close attention to what they write, draw, point at, or hold up. Only mention visible details when they are directly relevant to the explanation. Never narrate your perception process (do not say you are analyzing/looking at images, frames, feeds, or video). If it's camera-only, body language matters (uncertainty, pauses). If it's whiteboard-heavy, treat it like a classroom board: read labels and follow arrows and diagrams.
+You may receive a live image stream from the teacher — their camera (face, gestures, paper they hold up), an on-screen whiteboard, or a screen share. Pay close attention to what they write, draw, point at, or hold up. Only mention visible details when they are directly relevant to the explanation. Never narrate your perception process (do not say you are analyzing/looking at images, frames, feeds, or video). If it's camera-only, body language matters (uncertainty, pauses). If it's whiteboard-heavy, treat it like a classroom board: read labels and follow arrows and diagrams.
 
-**Non-verbal cues (video):** Treat the teacher's head nods as agreement or "yes" and head shakes as disagreement or "no". These count as full responses — if you see a clear nod, respond as if they said "yes"; if you see a clear shake, respond as if they said "no". You do not need them to say the words out loud. Watch the video for these gestures every time you respond.`;
+**HONESTY ABOUT WHAT YOU CAN SEE:** You will receive system messages like "[MEDIA] Camera ON", "[MEDIA] Camera OFF", "[MEDIA] Whiteboard ON", etc. These tell you the current state. ONLY claim to see something if you are actually receiving image frames AND the corresponding media is marked ON. If a media source is OFF or you haven't received any images, you MUST say "I can't see that right now" when asked. NEVER fabricate or hallucinate visual content you haven't actually received. If the teacher asks "can you see my screen/whiteboard/camera?" and you haven't received any recent images, be honest and say no.
+
+**Non-verbal cues (video):** When camera is ON and you are receiving frames, treat the teacher's head nods as agreement or "yes" and head shakes as disagreement or "no". These count as full responses — if you see a clear nod, respond as if they said "yes"; if you see a clear shake, respond as if they said "no". You do not need them to say the words out loud.`;
 
 const GESTURE_INSTRUCTION_VOICE_ONLY = `
 ## Senses
@@ -424,21 +426,23 @@ async function generateCoachingTip(
       contents: [{
         role: 'user',
         parts: [{ text:
-          `A person is teaching "${topic}". Below is a transcript of what they just said (speech-to-text; it may have errors or miss words):\n\n` +
-          `"${teacherSpeech}"\n\n` +
-          `Give ONE short coaching hint (1-2 sentences max). Do not assume the transcript is exact — focus on teaching clarity and delivery. Decide which is most useful:\n\n` +
-          `PRIMARILY focus on teaching clarity and delivery:\n` +
-          `- Are they being clear, or is the explanation vague/hard to follow?\n` +
-          `- Are they using concrete examples or staying too abstract?\n` +
-          `- Could a specific analogy make this click for a student?\n` +
-          `- Are they speaking confidently, or does the explanation feel uncertain?\n\n` +
-          `If the teacher has camera, whiteboard, or screen share active, comment on use of visuals: are they pointing, drawing, or showing something that helps? Could they use the board or screen more?\n` +
-          mediaNote + '\n\n' +
-          `ALSO flag subject-matter issues if they arise:\n` +
-          `- If the explanation is so generic it could apply to anything, point out the specific part of "${topic}" that needs more depth\n` +
-          `- If a student likely just asked something and this response didn't really address it, note what was missed\n\n` +
-          `Wrap the single most important word or phrase in **double asterisks**.\n` +
-          `Write the tip directly — no label, no bullet, no "Tip:".`
+          `A teacher is explaining "${topic}". Here is what they just said:\n\n"${teacherSpeech}"\n\n` +
+          `Write ONE coaching tip — a single sentence, max 15 words. Alternate between two styles:\n\n` +
+          `Style A — ENCOURAGEMENT: Call out something the teacher is doing well right now. Be specific.\n` +
+          `Style B — DIRECTIVE: Tell the teacher one concrete thing to do next.\n\n` +
+          `Pick whichever style is more useful for this moment. If the teacher is doing well, encourage. If they could improve, give a directive.\n\n` +
+          `Rules:\n` +
+          `- Be hyper-specific to what was just said — not generic advice\n` +
+          `- Wrap the single most critical keyword or phrase in **double asterisks**\n` +
+          `- No label, no bullet, no "Tip:", no second sentence\n` +
+          `- NEVER be negative or critical. Frame everything positively.\n\n` +
+          `Examples (do NOT copy these):\n` +
+          `- "Great use of a **concrete example** to anchor that concept."\n` +
+          `- "Ask Emma: **what breaks** when this assumption fails?"\n` +
+          `- "Nice **pacing** — you gave them time to absorb that."\n` +
+          `- "Give a **real-world example** before going deeper."\n` +
+          (hasVideo ? `- Teacher has visuals active (camera: ${media?.camera}, whiteboard: ${media?.whiteboard}, screen: ${media?.screen}) — praise good visual use or suggest using them.\n` : '') +
+          `\nOutput only the single sentence.`
         }]
       }],
     });
@@ -637,7 +641,7 @@ async function generateStudentDiagram(
 
 // ── On-demand diagram detection ─────────────────────────────────────────────
 
-const DIAGRAM_REQUEST_PATTERN = /\b(draw|sketch|diagram|illustrat|visuali[sz]|generate\s+(a\s+)?(diagram|image|picture|sketch|drawing)|show\s+me\s+(a\s+)?(diagram|sketch|drawing|picture)|can\s+you\s+draw|make\s+(a\s+)?(diagram|sketch|drawing))\b/i;
+const DIAGRAM_REQUEST_PATTERN = /\b(diagram|illustrat|visuali[sz]|generate\s+(a\s+)?(diagram|image|picture)|show\s+me\s+(a\s+)?(diagram|picture)|make\s+(a\s+)?(diagram))\b/i;
 
 function isDiagramRequest(text: string): boolean {
   return DIAGRAM_REQUEST_PATTERN.test(text);
@@ -1062,10 +1066,10 @@ async function main() {
         }
       }
 
-      // Coaching tip (rate-limited to one per 20s)
+      // Coaching tip (rate-limited to one per 10s)
       const now = Date.now();
       if (now > coachingCooldown) {
-        coachingCooldown = now + 20_000;
+        coachingCooldown = now + 10_000;
         generateCoachingTip(ai, topic, text, media).then(tip => {
           if (tip) sendJson({ type: 'coaching_tip', tip });
         });
@@ -1088,7 +1092,7 @@ async function main() {
     const SPEAKER_GAP_MS = 500;
     let studentsAllowed = true;
     let consecutiveStudentTurns = 0;
-    const MAX_STUDENT_EXCHANGES = 1;
+    const MAX_STUDENT_EXCHANGES = 3;
     const audioBuffers = new Map<string, string[]>(studentIds.map(id => [id, []]));
     const MAX_BUFFER_CHUNKS = 25;
     function clearAllBuffers() {
@@ -1166,11 +1170,17 @@ async function main() {
                   }
                 }
 
-                // Student output transcription — only stream if this student is active
+                // Student output transcription — claim mic if not yet claimed, then stream
                 if (msg.serverContent?.outputTranscription?.text) {
-                  const chunk = enforceTranscriptLanguage(msg.serverContent.outputTranscription.text, language);
+                  let chunk = enforceTranscriptLanguage(msg.serverContent.outputTranscription.text, language);
+                  if (chunk) chunk = chunk.replace(/\([\w\s.,!?'-]*\)/g, '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([,!?.;:])([A-Za-z])/g, '$1 $2').trim();
                   if (chunk) {
                     transcriptBuf += ' ' + chunk;
+                    // If transcript arrives before audio claims the mic, claim it now
+                    if (activeSpeaker === null && studentsAllowed && Date.now() > cooldownUntil) {
+                      activeSpeaker = id;
+                      sendJson({ type: 'student_speaking', name: id });
+                    }
                     if (activeSpeaker === id) sendJson({ type: 'transcript', text: chunk, name: id });
                   }
                 }
@@ -1444,6 +1454,21 @@ async function main() {
               })();
             }
           }
+          // Notify Gemini sessions when media sources are toggled
+          if (parsed.type === 'media_state') {
+            const parts: string[] = [];
+            if (typeof parsed.camera === 'boolean')     parts.push(`[MEDIA] Camera ${parsed.camera ? 'ON' : 'OFF'}`);
+            if (typeof parsed.whiteboard === 'boolean')  parts.push(`[MEDIA] Whiteboard ${parsed.whiteboard ? 'ON' : 'OFF'}`);
+            if (typeof parsed.screen === 'boolean')      parts.push(`[MEDIA] Screen share ${parsed.screen ? 'ON' : 'OFF'}`);
+            if (parts.length) {
+              // Update tracked media state
+              if (typeof parsed.camera === 'boolean')    media.camera = parsed.camera;
+              if (typeof parsed.whiteboard === 'boolean') media.whiteboard = parsed.whiteboard;
+              if (typeof parsed.screen === 'boolean')    media.screen = parsed.screen;
+              const cue = parts.join('. ') + '. Only claim to see content from sources that are ON.';
+              sessionMap.forEach(sess => { try { sess.sendRealtimeInput({ text: cue }); } catch (_) {} });
+            }
+          }
           if (parsed.type === 'video_frame' && typeof parsed.base64 === 'string') {
             // Only relay video frames if the teacher is speaking or recently spoke
             // This prevents the model from hallucinating responses to visual-only changes
@@ -1521,6 +1546,20 @@ async function main() {
                   try { session!.sendRealtimeInput({ text: note }); } catch (_) {}
                 }
               })();
+            }
+          }
+          // Notify Gemini session when media sources are toggled
+          if (msg.type === 'media_state') {
+            const parts: string[] = [];
+            if (typeof msg.camera === 'boolean')     parts.push(`[MEDIA] Camera ${msg.camera ? 'ON' : 'OFF'}`);
+            if (typeof msg.whiteboard === 'boolean')  parts.push(`[MEDIA] Whiteboard ${msg.whiteboard ? 'ON' : 'OFF'}`);
+            if (typeof msg.screen === 'boolean')      parts.push(`[MEDIA] Screen share ${msg.screen ? 'ON' : 'OFF'}`);
+            if (parts.length) {
+              if (typeof msg.camera === 'boolean')    media.camera = msg.camera;
+              if (typeof msg.whiteboard === 'boolean') media.whiteboard = msg.whiteboard;
+              if (typeof msg.screen === 'boolean')    media.screen = msg.screen;
+              const cue = parts.join('. ') + '. Only claim to see content from sources that are ON.';
+              try { session!.sendRealtimeInput({ text: cue }); } catch (_) {}
             }
           }
           if (msg.type === 'video_frame' && typeof msg.base64 === 'string') {

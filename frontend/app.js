@@ -882,17 +882,40 @@ async function cleanupEntry(entry, showCleaningState = true) {
 }
 
 // ── Coaching tips ────────────────────────────────────────────────────────────
+let coachingFadeTimer = null;
+const MAX_COACHING_TIPS = 6;
+
 function addCoachingTip(tipText) {
+  // Remove empty placeholder
   const empty = coachingBody.querySelector(".coaching-empty");
   if (empty) empty.remove();
 
+  // Fade all existing tips to "old" state
+  if (coachingFadeTimer) { clearTimeout(coachingFadeTimer); coachingFadeTimer = null; }
+  coachingBody.querySelectorAll(".coaching-tip.active").forEach(el => {
+    el.classList.remove("active");
+    el.classList.add("past");
+  });
+
+  // Add new tip as active
   const div = document.createElement("div");
-  div.className = "coaching-tip";
+  div.className = "coaching-tip active";
   div.innerHTML = tipText.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
   coachingBody.appendChild(div);
   coachingBody.scrollTop = coachingBody.scrollHeight;
 
-  while (coachingBody.children.length > 8) coachingBody.removeChild(coachingBody.firstChild);
+  // After 15s, fade the current tip to past
+  coachingFadeTimer = setTimeout(() => {
+    div.classList.remove("active");
+    div.classList.add("past");
+    coachingFadeTimer = null;
+  }, 15_000);
+
+  // Remove oldest tips if over limit
+  while (coachingBody.querySelectorAll(".coaching-tip").length > MAX_COACHING_TIPS) {
+    const oldest = coachingBody.querySelector(".coaching-tip");
+    if (oldest) oldest.remove();
+  }
 }
 
 // ── Whiteboard ───────────────────────────────────────────────────────────────
@@ -2007,6 +2030,9 @@ function disconnect(keepScreen = false) {
   vadInSpeech = false;
   vadSilenceCount = 0;
   micMuted = false;
+  muteBtn.innerHTML = '<span class="icon">&#x1F3A4;</span> Mute';
+  muteBtn.classList.remove("muted");
+  if (coachingFadeTimer) { clearTimeout(coachingFadeTimer); coachingFadeTimer = null; }
   teacherSpeechEnded = false;
   currentTeacherEntry = null;
   currentStudentEntry = null;
@@ -2015,6 +2041,7 @@ function disconnect(keepScreen = false) {
   activeSpeakerName = "";
   awaitingReflection = false;
   whiteboardInited = false;
+  coachingBody.innerHTML = '<div class="coaching-empty">Tips will appear as you teach\u2026</div>';
   resetWhiteboardView();
   setWbFullscreen(false);
   disableCameraFloating();
@@ -2159,24 +2186,31 @@ async function connect() {
       // Student transcript: new student turn — close any open teacher entry first.
       if (msg.type === "transcript" && msg.text) {
         if (msg.name) activeSpeakerName = STUDENTS[msg.name.toLowerCase()]?.name || msg.name;
+        const expectedSpeaker = classroomMode ? (activeSpeakerName || "Student") : "Student";
+
+        // If the open entry belongs to a DIFFERENT student, close it and start a new one
+        if (currentStudentEntry && classroomMode && currentStudentEntry.speaker !== expectedSpeaker) {
+          const old = currentStudentEntry;
+          currentStudentEntry = null;
+          lastStudentFinalizedAt = Date.now();
+          if (old.rawText.trim()) cleanupEntry(old, false).catch(() => {});
+        }
+
         if (!currentStudentEntry) {
           if (Date.now() - lastStudentFinalizedAt < STALE_CHUNK_WINDOW_MS) {
             // Stale chunk arriving after student turn was finalized — drop it
           } else {
-            // Close teacher entry if it was left open (e.g. AI responded before VAD silence threshold)
+            // Close teacher entry if it was left open
             if (currentTeacherEntry) {
               const entry = currentTeacherEntry;
               currentTeacherEntry = null;
               lastTeacherFinalizedAt = Date.now();
               if (entry.rawText.trim()) cleanupEntry(entry, false).catch(() => {});
             }
-            const speaker = classroomMode ? (activeSpeakerName || "Student") : "Student";
-            currentStudentEntry = addTranscriptEntry(speaker, "student");
-            appendToEntry(currentStudentEntry, msg.text, { live: true, predict: true });
+            currentStudentEntry = addTranscriptEntry(expectedSpeaker, "student");
           }
-        } else {
-          appendToEntry(currentStudentEntry, msg.text, { live: true, predict: true });
         }
+        if (currentStudentEntry) appendToEntry(currentStudentEntry, msg.text, { live: true, predict: true });
       }
 
       // Solo turn complete
@@ -2314,11 +2348,13 @@ camToggleBtn.addEventListener("click", async () => {
     cameraEnabled = false;
     stopCamera();
     updateMediaLayout();
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "media_state", camera: false }));
   } else {
     try {
       cameraEnabled = true;
       updateMediaLayout(); // Make PiP container visible BEFORE play()
       await startCamera();
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "media_state", camera: true }));
     } catch (e) {
       cameraEnabled = false;
       updateMediaLayout();
@@ -2336,6 +2372,7 @@ wbToggleBtn.addEventListener("click", () => {
     setWbFullscreen(false);
   }
   updateMediaLayout();
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "media_state", whiteboard: whiteboardEnabled }));
 });
 
 screenToggleBtn.addEventListener("click", async () => {
@@ -2343,12 +2380,14 @@ screenToggleBtn.addEventListener("click", async () => {
     screenEnabled = false;
     stopScreenShare();
     updateMediaLayout();
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "media_state", screen: false }));
   } else {
     try {
       screenEnabled = true;
       updateMediaLayout(); // Show container before stream starts
       await startScreenShare();
       startFrameSending();
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "media_state", screen: true }));
     } catch (e) {
       screenEnabled = false;
       updateMediaLayout();
