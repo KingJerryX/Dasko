@@ -809,10 +809,10 @@
     .coaching-body::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 2px; }
     .coaching-tip {
       background: #FFF7F5; border-left: 3px solid #FF7355; border-radius: 0 8px 8px 0;
-      padding: 0.6rem 0.75rem; margin-bottom: 0.5rem; font-size: 0.78rem;
-      line-height: 1.5; color: #374151; animation: fadeIn 0.3s ease;
+      padding: 0.7rem 0.85rem; margin-bottom: 0.6rem; font-size: 0.95rem;
+      line-height: 1.55; color: #374151; animation: fadeIn 0.3s ease;
     }
-    .coaching-tip strong { color: #FF7355; }
+    .coaching-tip strong { color: #FF7355; font-size: 1.05rem; }
     .coaching-empty { font-size: 0.75rem; color: #9CA3AF; text-align: center; margin-top: 2rem; }
 
     /* Bottom bar */
@@ -1154,20 +1154,9 @@
               </div>
             </div>
 
-            <div style="display:flex;align-items:center;justify-content:space-between;">
-              <label class="field-label" for="useCamera" style="margin-bottom:0;cursor:pointer;">Camera</label>
-              <label class="toggle">
-                <input type="checkbox" id="useCamera" />
-                <span class="toggle-track"><span class="toggle-thumb"></span></span>
-              </label>
-            </div>
-            <div style="display:flex;align-items:center;justify-content:space-between;">
-              <label class="field-label" for="useWhiteboard" style="margin-bottom:0;cursor:pointer;">Whiteboard</label>
-              <label class="toggle">
-                <input type="checkbox" id="useWhiteboard" />
-                <span class="toggle-track"><span class="toggle-thumb"></span></span>
-              </label>
-            </div>
+            <!-- Camera/Whiteboard toggles removed — available in-session toolbar -->
+            <input type="checkbox" id="useCamera" style="display:none" />
+            <input type="checkbox" id="useWhiteboard" style="display:none" />
 
             <button id="startBtn" type="button">Start teaching</button>
           </div>
