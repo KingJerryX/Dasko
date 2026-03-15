@@ -79,11 +79,17 @@
     #setup-screen {
       display: none; width: 100%; min-height: 100vh;
       padding: 2rem 1rem; transition: opacity 0.3s ease-in-out;
+      position: relative; overflow: hidden;
     }
     #setup-screen.show { display: block; }
+    #ambientCanvas {
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      pointer-events: none; z-index: 0;
+    }
     .setup-container {
       max-width: 80rem; margin: 0 auto; padding: 0 1rem;
       display: grid; grid-template-columns: repeat(12, 1fr); gap: 1.5rem; align-items: start;
+      position: relative; z-index: 1;
     }
     .setup-growth { grid-column: span 3; }
     .setup-lab { grid-column: span 6; }
@@ -934,11 +940,11 @@
     }
     #reflection-screen.show { display: block; }
     .reflection-inner { max-width: 56rem; margin: 0 auto; }
-    .reflection-recap { font-size: 0.875rem; color: var(--dasko-text-secondary); line-height: 1.6; }
+    .reflection-recap { font-size: 1rem; color: var(--dasko-text-secondary); line-height: 1.7; }
     .reflection-recap strong { color: var(--dasko-text); }
-    .reflection-recap-standalone { margin-bottom: 1.5rem; }
-    .reflection-title { font-size: 1.5rem; font-weight: 600; text-align: center; color: var(--dasko-text); margin-bottom: 0.5rem; }
-    .reflection-summary { text-align: center; color: var(--dasko-text-secondary); font-size: 0.9rem; line-height: 1.6; font-weight: 400; margin-bottom: 1.5rem; }
+    .reflection-recap-standalone { margin-bottom: 1.75rem; }
+    .reflection-title { font-size: 1.75rem; font-weight: 700; text-align: center; color: var(--dasko-text); margin-bottom: 0.6rem; }
+    .reflection-summary { text-align: center; color: var(--dasko-text-secondary); font-size: 1.05rem; line-height: 1.7; font-weight: 400; margin-bottom: 1.75rem; }
     .reflection-bento {
       display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
     }
@@ -949,29 +955,34 @@
       .reflection-bento .bento-row1, .reflection-bento .bento-row2 { grid-column: span 1; }
     }
     .reflection-card {
-      padding: 1.25rem; border-left-width: 4px; border-left-color: var(--dasko-border-solid);
+      padding: 1.5rem; border-left-width: 4px; border-left-color: var(--dasko-border-solid);
       border-radius: 1rem; transition: var(--dasko-transition);
     }
     .reflection-card h3 {
-      font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
-      letter-spacing: 0.06em; color: var(--dasko-text-secondary); margin-bottom: 0.6rem;
+      font-size: 0.8rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--dasko-text); margin-bottom: 0.75rem;
     }
     .reflection-card ul { list-style: none; padding: 0; }
-    .reflection-card li { font-size: 0.8125rem; font-weight: 400; color: var(--dasko-text); padding: 0.35rem 0; line-height: 1.55; }
+    .reflection-card li { font-size: 0.95rem; font-weight: 400; color: var(--dasko-text); padding: 0.45rem 0; line-height: 1.6; }
     .reflection-card li::before { margin-right: 0.5rem; }
-    .reflection-card.card-strength { background: rgba(16, 185, 129, 0.08); border-left-color: #059669; }
-    .reflection-card.card-strength li::before { content: "\2022"; color: #059669; }
-    .reflection-card.card-strength .reflection-highlight { font-weight: 600; color: #047857; }
-    .reflection-card.card-gap { background: rgba(220, 38, 38, 0.06); border-left-color: #DC2626; }
-    .reflection-card.card-gap li::before { content: "\2022"; color: #DC2626; }
-    .reflection-card.card-gap .reflection-highlight { font-weight: 600; color: #B91C1C; }
-    .reflection-card.card-improvement { background: rgba(255, 115, 85, 0.06); border-left-color: var(--dasko-accent); }
-    .reflection-card.card-improvement li::before { content: "\2022"; color: var(--dasko-accent); }
-    .reflection-card.card-improvement .reflection-highlight { font-weight: 600; color: var(--dasko-accent); }
-    .reflection-card.card-questions li::before { content: "\2022"; color: var(--dasko-text-secondary); }
+    .reflection-card.card-strength { background: rgba(16, 185, 129, 0.06); border-left-color: #10B981; }
+    .reflection-card.card-strength h3 { color: #059669; }
+    .reflection-card.card-strength li::before { content: "\2022"; color: #10B981; }
+    .reflection-card.card-strength .reflection-highlight { font-weight: 600; color: #059669; }
+    .reflection-card.card-gap { background: rgba(255, 115, 85, 0.06); border-left-color: var(--dasko-accent); }
+    .reflection-card.card-gap h3 { color: var(--dasko-accent); }
+    .reflection-card.card-gap li::before { content: "\2022"; color: var(--dasko-accent); }
+    .reflection-card.card-gap .reflection-highlight { font-weight: 600; color: #E5553B; }
+    .reflection-card.card-improvement { background: rgba(99, 102, 241, 0.06); border-left-color: #6366F1; }
+    .reflection-card.card-improvement h3 { color: #6366F1; }
+    .reflection-card.card-improvement li::before { content: "\2022"; color: #6366F1; }
+    .reflection-card.card-improvement .reflection-highlight { font-weight: 600; color: #4F46E5; }
+    .reflection-card.card-questions { background: rgba(245, 158, 11, 0.06); border-left-color: #F59E0B; }
+    .reflection-card.card-questions h3 { color: #D97706; }
+    .reflection-card.card-questions li::before { content: "\2022"; color: #F59E0B; }
     .reflection-checklist { list-style: none; padding: 0; }
-    .reflection-checklist li { display: flex; align-items: flex-start; gap: 0.5rem; padding: 0.4rem 0; }
-    .reflection-checklist input[type="checkbox"] { margin-top: 0.2rem; accent-color: var(--dasko-accent); }
+    .reflection-checklist li { display: flex; align-items: flex-start; gap: 0.5rem; padding: 0.5rem 0; font-size: 0.95rem; }
+    .reflection-checklist input[type="checkbox"] { margin-top: 0.25rem; accent-color: var(--dasko-accent); width: 1rem; height: 1rem; }
     .reflection-card.presentation-card { grid-column: 1 / -1; }
     .reflection-skill-row {
       display: flex; align-items: flex-start; gap: 0.75rem; margin-bottom: 0.75rem;
@@ -980,13 +991,13 @@
     .reflection-skill-row:last-child { margin-bottom: 0; }
     .reflection-skill-icon { font-size: 1.25rem; flex-shrink: 0; }
     .reflection-skill-content { flex: 1; min-width: 0; }
-    .reflection-skill-label { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dasko-text-secondary); margin-bottom: 0.25rem; }
-    .reflection-skill-text { font-size: 0.85rem; color: var(--dasko-text); line-height: 1.5; }
-    .reflection-empty-msg { font-size: 0.8125rem; color: var(--dasko-text-secondary); font-style: italic; padding: 0.5rem 0; }
+    .reflection-skill-label { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dasko-text); margin-bottom: 0.3rem; }
+    .reflection-skill-text { font-size: 0.95rem; color: var(--dasko-text); line-height: 1.6; }
+    .reflection-empty-msg { font-size: 0.95rem; color: var(--dasko-text-secondary); font-style: italic; padding: 0.5rem 0; }
     .reflection-actions { display: flex; gap: 0.75rem; justify-content: center; margin-top: 1.5rem; flex-wrap: wrap; }
     .reflection-btn {
-      padding: 0.75rem 1.5rem; border: 1px solid var(--dasko-border-solid); border-radius: 0.75rem;
-      background: rgba(255,255,255,0.6); font-family: inherit; font-size: 0.875rem; font-weight: 500;
+      padding: 0.85rem 1.75rem; border: 1px solid var(--dasko-border-solid); border-radius: 0.75rem;
+      background: rgba(255,255,255,0.6); font-family: inherit; font-size: 1rem; font-weight: 500;
       color: var(--dasko-text); cursor: pointer; transition: background 0.2s, box-shadow 0.2s;
     }
     .reflection-btn:hover { background: rgba(255,255,255,0.9); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
@@ -1038,6 +1049,7 @@
 
   <!-- SETUP (Command Center) -->
   <div id="setup-screen">
+    <canvas id="ambientCanvas"></canvas>
     <div class="setup-container">
       <!-- Left: Growth Column -->
       <aside class="setup-growth">

@@ -75,6 +75,78 @@ const uploadMaterialBtn   = document.getElementById("uploadMaterialBtn");
 const sessionFileInput    = document.getElementById("sessionFileInput");
 const sessionToast        = document.getElementById("sessionToast");
 
+// ── Ambient Visualizer ──────────────────────────────────────────────────────
+let ambientViz = null;
+
+class AmbientVisualizer {
+  constructor(canvasId) {
+    this.canvas = document.getElementById(canvasId);
+    this.ctx = this.canvas.getContext("2d");
+    this.rafId = null;
+    this.waves = [];
+    this.time = 0;
+  }
+
+  initWaves() {
+    this.waves = [
+      { amplitude: 45, frequency: 0.008, speed: 0.015, phase: 0,   opacity: 0.18, yOffset: 0.30 },
+      { amplitude: 55, frequency: 0.006, speed: 0.012, phase: 1.2, opacity: 0.14, yOffset: 0.42 },
+      { amplitude: 35, frequency: 0.010, speed: 0.018, phase: 2.5, opacity: 0.12, yOffset: 0.55 },
+      { amplitude: 50, frequency: 0.007, speed: 0.010, phase: 3.8, opacity: 0.16, yOffset: 0.68 },
+      { amplitude: 30, frequency: 0.012, speed: 0.014, phase: 5.0, opacity: 0.10, yOffset: 0.80 },
+    ];
+  }
+
+  resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = this.canvas.parentElement.getBoundingClientRect();
+    this.canvas.width = rect.width * dpr;
+    this.canvas.height = rect.height * dpr;
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.w = rect.width;
+    this.h = rect.height;
+  }
+
+  draw() {
+    this.ctx.clearRect(0, 0, this.w, this.h);
+    const breathe = 1 + Math.sin(this.time * 0.002) * 0.15;
+
+    for (const wave of this.waves) {
+      this.ctx.beginPath();
+      this.ctx.strokeStyle = `rgba(255, 115, 85, ${wave.opacity})`;
+      this.ctx.lineWidth = 2;
+      const baseY = this.h * wave.yOffset;
+      const amp = wave.amplitude * breathe;
+
+      for (let x = 0; x <= this.w; x += 4) {
+        const y = baseY
+          + Math.sin(x * wave.frequency + this.time * wave.speed + wave.phase) * amp
+          + Math.sin(x * wave.frequency * 0.5 + this.time * wave.speed * 1.3) * amp * 0.3;
+        if (x === 0) this.ctx.moveTo(x, y);
+        else this.ctx.lineTo(x, y);
+      }
+      this.ctx.stroke();
+    }
+
+    this.time++;
+    this.rafId = requestAnimationFrame(() => this.draw());
+  }
+
+  start() {
+    this.initWaves();
+    this.time = 0;
+    this.resize();
+    this.draw();
+    this._resizeHandler = () => this.resize();
+    window.addEventListener("resize", this._resizeHandler);
+  }
+
+  stop() {
+    if (this.rafId) { cancelAnimationFrame(this.rafId); this.rafId = null; }
+    if (this._resizeHandler) { window.removeEventListener("resize", this._resizeHandler); this._resizeHandler = null; }
+  }
+}
+
 // ── Student roster ───────────────────────────────────────────────────────────
 const STUDENTS = {
   emma:   { name: "Emma",   color: "#93C5FD", glow: "rgba(147,197,253,0.5)" },
@@ -118,6 +190,8 @@ let sessionReady     = false;
 let playbackContext  = null;
 let playbackGainNode = null;
 let nextPlayTime     = 0;
+let activeSources    = [];    // track AudioBufferSourceNodes for interruption
+let suppressAudio    = false; // suppress student audio when teacher is interrupting
 let audioChunksReceived = 0;
 let currentOrbState  = "idle";
 let activeSpeakerName = "";
@@ -392,6 +466,8 @@ getStartedBtn.addEventListener("click", () => {
     setupScreen.style.display = "block";
     setupScreen.classList.add("fade-in");
     setTimeout(() => setupScreen.classList.remove("fade-in"), 300);
+    if (!ambientViz) ambientViz = new AmbientVisualizer("ambientCanvas");
+    ambientViz.start();
     startSetupHardware();
     setProTip();
     proTipInterval = setInterval(setProTip, 10000);
@@ -724,6 +800,7 @@ function pcm16ToFloat32(pcm16) {
 async function playPcm24k(arrayBuffer) {
   if (!arrayBuffer || arrayBuffer.byteLength === 0) return;
   if (awaitingReflection) return;
+  if (suppressAudio) return; // teacher is interrupting — discard incoming student audio
   try {
     audioChunksReceived++;
     if (audioChunksReceived === 1) setOrbState("speaking");
@@ -747,13 +824,32 @@ async function playPcm24k(arrayBuffer) {
     if (nextPlayTime < now) nextPlayTime = now;
     src.start(nextPlayTime);
     nextPlayTime += buf.duration;
+    // Track source for interruption
+    activeSources.push(src);
+    src.onended = () => {
+      const idx = activeSources.indexOf(src);
+      if (idx !== -1) activeSources.splice(idx, 1);
+    };
   } catch (err) { console.error("playPcm24k:", err); }
 }
 
+/** Immediately stop all queued audio playback (for teacher interruption) */
+function interruptPlayback() {
+  for (const src of activeSources) {
+    try { src.stop(); } catch (_) {}
+  }
+  activeSources = [];
+  nextPlayTime = 0;
+  audioChunksReceived = 0;
+}
+
 function stopPlayback() {
+  for (const src of activeSources) { try { src.stop(); } catch (_) {} }
+  activeSources = [];
   playbackGainNode = null;
   if (playbackContext) { try { playbackContext.close(); } catch (_) {} playbackContext = null; }
   nextPlayTime = 0;
+  suppressAudio = false;
 }
 
 // ── Transcript management ────────────────────────────────────────────────────
@@ -1629,6 +1725,13 @@ async function startMic(existingStream = null) {
         setMicActive(true);
         if (currentOrbState !== "speaking") setOrbState("listening");
         try { ws.send(JSON.stringify({ type: "speech_start" })); } catch (_) {}
+        // Instantly kill any student audio that's currently playing.
+        // This is frontend-only: stops queued AudioBufferSourceNodes so the
+        // teacher doesn't hear the student rambling over them.
+        // suppressAudio blocks any in-flight chunks still arriving via WebSocket.
+        // Reset happens on speech_end so the next student response plays fine.
+        interruptPlayback();
+        suppressAudio = true;
       }
       vadSilenceCount = 0;
     } else if (vadInSpeech) {
@@ -1639,6 +1742,7 @@ async function startMic(existingStream = null) {
         lastSpeechFrameTime = Date.now();
         setMicActive(!micMuted);
         if (currentOrbState !== "speaking") setOrbState("thinking");
+        suppressAudio = false; // teacher stopped — allow student audio again
         try { ws.send(JSON.stringify({ type: "speech_end", media: { camera: cameraEnabled, whiteboard: whiteboardEnabled, screen: screenEnabled } })); } catch (_) {}
 
         lastTeacherFinalizedAt = Date.now();
@@ -1770,6 +1874,7 @@ function hideTimeoutModal() {
 // ── Session lifecycle ────────────────────────────────────────────────────────
 function showSession(topic) {
   setupScreen.style.display = "none";
+  if (ambientViz) ambientViz.stop();
   reflectionScreen.style.display = "none";
   if (reflectionLoadingScreen) reflectionLoadingScreen.classList.remove("visible");
   sessionScreen.style.display = "flex";
@@ -1879,6 +1984,8 @@ function showSetup() {
   landingScreen.style.display = "none";
   sessionScreen.classList.remove("classroom-mode");
   setupScreen.style.display = "block";
+  if (!ambientViz) ambientViz = new AmbientVisualizer("ambientCanvas");
+  ambientViz.start();
   loadRecentSessions();
   updateSetupStats();
   setProTip();
@@ -1892,6 +1999,7 @@ function showSetup() {
 function showLanding() {
   sessionScreen.style.display = "none";
   setupScreen.style.display = "none";
+  if (ambientViz) ambientViz.stop();
   reflectionScreen.style.display = "none";
   if (reflectionLoadingScreen) reflectionLoadingScreen.classList.remove("visible");
   landingScreen.style.display = "flex";
@@ -2227,6 +2335,7 @@ async function connect() {
 
       // Solo turn complete
       if (msg.type === "turn_complete") {
+        suppressAudio = false;
         lastStudentFinalizedAt = Date.now();
         const studentEntry = currentStudentEntry;
         currentStudentEntry = null;
@@ -2240,6 +2349,7 @@ async function connect() {
 
       // Classroom student speaking
       if (msg.type === "student_speaking" && msg.name) {
+        suppressAudio = false; // student is speaking — allow audio through
         activeSpeakerName = STUDENTS[msg.name.toLowerCase()]?.name || msg.name;
         if (classroomMode) {
           activateStudentOrb(msg.name.toLowerCase());
@@ -2251,6 +2361,7 @@ async function connect() {
 
       // Classroom turn complete
       if (msg.type === "student_turn_complete" && msg.studentId) {
+        suppressAudio = false;
         lastStudentFinalizedAt = Date.now();
         const studentEntry = currentStudentEntry;
         currentStudentEntry = null;
@@ -2260,6 +2371,40 @@ async function connect() {
         deactivateStudentOrb(msg.studentId);
         audioChunksReceived = 0;
         setStatus("Your turn \u2014 speak and pause when done.", "connected");
+      }
+
+      // Student interrupted by teacher
+      if (msg.type === "student_interrupted") {
+        // Stop all queued audio playback immediately
+        interruptPlayback();
+        suppressAudio = true;
+        // Deactivate student orbs
+        if (classroomMode && msg.studentId) {
+          deactivateStudentOrb(msg.studentId);
+        }
+        if (classroomMode) {
+          document.querySelectorAll(".student-orb").forEach(orb => orb.classList.remove("speaking"));
+        }
+        // Finalize current transcript entry (partial is fine)
+        if (currentStudentEntry) {
+          const entry = currentStudentEntry;
+          currentStudentEntry = null;
+          lastStudentFinalizedAt = Date.now();
+          if (entry.rawText.trim()) cleanupEntry(entry, false).catch(() => {});
+        }
+        activeSpeakerName = "";
+        setOrbState("listening");
+        setStatus("Your turn \u2014 speak and pause when done.", "connected");
+      }
+
+      // Teacher turn — students hit max exchanges, revert to teacher
+      if (msg.type === "teacher_turn") {
+        // Deactivate all student orbs
+        if (classroomMode) {
+          document.querySelectorAll(".student-orb").forEach(orb => orb.classList.remove("speaking"));
+        }
+        setOrbState("listening");
+        setStatus("Your students are waiting \u2014 it's your turn to speak.", "connected");
       }
 
       // Emotion

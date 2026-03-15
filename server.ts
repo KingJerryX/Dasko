@@ -1052,6 +1052,46 @@ async function main() {
 
       sessionLog.push({ role: 'teacher', name: 'Teacher', text, time: Date.now() });
 
+      // Addressed-student priority: if teacher mentioned a student by name, lock the mic for that student
+      if (sessionMap && studentIds.length >= 2) {
+        const lower = text.toLowerCase();
+        const addressedId = studentIds.find(id => {
+          const name = id.toLowerCase();
+          const re = new RegExp(`\\b${name}\\b`, 'i');
+          return re.test(lower);
+        });
+        if (addressedId) {
+          addressedStudent = addressedId;
+          console.log(`[Dasko] Teacher addressed ${addressedId} — locking first turn for them`);
+          const addressedSess = sessionMap.get(addressedId);
+          if (addressedSess) {
+            try {
+              addressedSess.sendRealtimeInput({
+                text: `[The teacher just called on you by name. You MUST respond. Speak up now.]`,
+              });
+            } catch (_) {}
+          }
+          // Tell other students to stay silent
+          sessionMap.forEach((sess, otherId) => {
+            if (otherId !== addressedId) {
+              try {
+                sess.sendRealtimeInput({
+                  text: `[The teacher called on ${addressedId.charAt(0).toUpperCase() + addressedId.slice(1)} specifically. Do NOT speak. Stay completely silent and wait.]`,
+                });
+              } catch (_) {}
+            }
+          });
+          // Safety timeout: if addressed student hasn't spoken in 5s, clear the lock
+          const lockedId = addressedId;
+          setTimeout(() => {
+            if (addressedStudent === lockedId) {
+              console.log(`[Dasko] Addressed student ${lockedId} didn't respond in 5s — clearing lock`);
+              addressedStudent = null;
+            }
+          }, 5000);
+        }
+      }
+
       // On-demand diagram: detect diagram request from teacher's speech
       if (isDiagramRequest(text)) {
         console.log('[Dasko] On-demand diagram requested via speech:', text.slice(0, 80));
@@ -1099,12 +1139,17 @@ async function main() {
     let studentsAllowed = true;
     let consecutiveStudentTurns = 0;
     const MAX_STUDENT_EXCHANGES = 3;
+    let currentMaxExchanges = 1 + Math.floor(Math.random() * MAX_STUDENT_EXCHANGES); // random 1-3 per teacher turn
+    let addressedStudent: string | null = null; // when teacher names a student, only that student may speak first
     const audioBuffers = new Map<string, string[]>(studentIds.map(id => [id, []]));
     const MAX_BUFFER_CHUNKS = 25;
     function clearAllBuffers() {
       audioBuffers.forEach((_, k) => audioBuffers.set(k, []));
     }
     let studentTranscriptBuf = '';
+    // Shared transcript buffers for classroom students (accessible outside closure for interruption handling)
+    const transcriptBuffers = new Map<string, string>(studentIds.map(id => [id, '']));
+    let interruptedStudent: string | null = null;
 
     // (Diagram generation is on-demand only — no auto-generation state needed)
     let diagramPopupOpen = false; // when true, skip regular video frames (diagram frames take priority)
@@ -1135,7 +1180,6 @@ async function main() {
 
       try {
         const entries = await Promise.all(studentIds.map(async id => {
-          let transcriptBuf = '';
           const voice = STUDENT_VOICES[id] || 'Zephyr';
           const cfg: types.LiveConnectConfig = {
             responseModalities: [Modality.AUDIO],
@@ -1172,6 +1216,24 @@ async function main() {
                   if (chunk) {
                     teacherTranscriptBuf += ' ' + chunk;
                     sendJson({ type: 'teacher_transcript', text: chunk });
+
+                    // Graceful interruption: real teacher speech arrived while a student is talking
+                    // teacherIsSpeaking guard prevents late-arriving transcript chunks
+                    // (from after the teacher stopped) from falsely triggering interruption
+                    if (activeSpeaker !== null && interruptedStudent === null && teacherIsSpeaking) {
+                      const interrupted = activeSpeaker;
+                      interruptedStudent = interrupted;
+                      console.log(`[Dasko] Teacher interrupted ${interrupted} (confirmed by transcript: "${chunk.slice(0, 40)}")`);
+                      const partialTranscript = (transcriptBuffers.get(interrupted) || '').trim();
+                      transcriptBuffers.set(interrupted, '');
+                      activeSpeaker = null;
+                      clearAllBuffers();
+                      cooldownUntil = 0;
+                      sendJson({ type: 'student_interrupted', studentId: interrupted });
+                      if (partialTranscript) {
+                        onStudentSpeech(interrupted.charAt(0).toUpperCase() + interrupted.slice(1), partialTranscript);
+                      }
+                    }
                   }
                 }
 
@@ -1180,10 +1242,13 @@ async function main() {
                   let chunk = enforceTranscriptLanguage(msg.serverContent.outputTranscription.text, language);
                   if (chunk) chunk = chunk.replace(/\([\w\s.,!?'-]*\)/g, '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([,!?.;:])([A-Za-z])/g, '$1 $2').trim();
                   if (chunk) {
-                    transcriptBuf += ' ' + chunk;
+                    transcriptBuffers.set(id, (transcriptBuffers.get(id) || '') + ' ' + chunk);
                     // If transcript arrives before audio claims the mic, claim it now
-                    if (activeSpeaker === null && studentsAllowed && Date.now() > cooldownUntil) {
+                    // But respect addressed-student lock: only the addressed student can claim first turn
+                    const blockedByAddress = addressedStudent && addressedStudent !== id && activeSpeaker === null && consecutiveStudentTurns === 0;
+                    if (!blockedByAddress && activeSpeaker === null && studentsAllowed && Date.now() > cooldownUntil) {
                       activeSpeaker = id;
+                      if (addressedStudent === id) addressedStudent = null;
                       sendJson({ type: 'student_speaking', name: id });
                     }
                     if (activeSpeaker === id) sendJson({ type: 'transcript', text: chunk, name: id });
@@ -1202,10 +1267,20 @@ async function main() {
                       continue;
                     }
 
+                    // Addressed-student enforcement: if teacher called on someone, only they can claim the first turn
+                    if (addressedStudent && addressedStudent !== id && activeSpeaker === null && consecutiveStudentTurns === 0) {
+                      // Not the addressed student and no one has spoken yet — buffer silently but don't claim mic
+                      const buf = audioBuffers.get(id) ?? [];
+                      if (buf.length < MAX_BUFFER_CHUNKS) buf.push(chunk);
+                      audioBuffers.set(id, buf);
+                      continue;
+                    }
+
                     if (activeSpeaker === null) {
                       if (now > cooldownUntil) {
                         // Cooldown expired: claim the mic and flush any buffered audio first
                         activeSpeaker = id;
+                        if (addressedStudent === id) addressedStudent = null; // addressed student claimed, clear lock
                         sendJson({ type: 'student_speaking', name: id });
                         const buffered = audioBuffers.get(id) ?? [];
                         for (const b of buffered) sendJson({ type: 'classroom_audio', studentId: id, base64: b });
@@ -1225,9 +1300,15 @@ async function main() {
                 }
 
                 if (msg.serverContent?.turnComplete) {
+                  // If this student was interrupted, just clean up — don't double-process
+                  if (interruptedStudent === id) {
+                    transcriptBuffers.set(id, '');
+                    interruptedStudent = null;
+                    return;
+                  }
                   if (activeSpeaker === id) {
-                    const full = transcriptBuf.trim();
-                    transcriptBuf = '';
+                    const full = (transcriptBuffers.get(id) || '').trim();
+                    transcriptBuffers.set(id, '');
                     activeSpeaker = null;
                     cooldownUntil = Date.now() + SPEAKER_GAP_MS;
                     consecutiveStudentTurns++;
@@ -1236,9 +1317,10 @@ async function main() {
                     sendJson({ type: 'student_turn_complete', studentId: id });
                     if (full) onStudentSpeech(id.charAt(0).toUpperCase() + id.slice(1), full);
 
-                    if (consecutiveStudentTurns >= MAX_STUDENT_EXCHANGES) {
+                    if (consecutiveStudentTurns >= currentMaxExchanges) {
                       // Hit the limit — silence all students until teacher speaks
                       studentsAllowed = false;
+                      sendJson({ type: 'teacher_turn' });
                       sendJson({ type: 'info', message: 'Students are waiting for your response.' });
                     } else if (full) {
                       // Still within limit — let peers hear what was said
@@ -1252,7 +1334,7 @@ async function main() {
                       });
                     }
                   } else {
-                    transcriptBuf = '';
+                    transcriptBuffers.set(id, '');
                   }
                 }
               },
@@ -1317,6 +1399,9 @@ async function main() {
                   sendJson({ type: 'teacher_transcript', text: chunk });
                 }
               }
+              // Solo mode: no server-side interruption suppression needed.
+              // Gemini Live API handles barge-in natively — the model stops
+              // generating audio when it hears teacher input.
               if (message.serverContent?.outputTranscription?.text) {
                 const chunk = enforceTranscriptLanguage(message.serverContent.outputTranscription.text, language);
                 if (chunk) {
@@ -1391,6 +1476,9 @@ async function main() {
           const b64 = data.toString('base64');
           studentsAllowed = true;
           consecutiveStudentTurns = 0;
+          currentMaxExchanges = 1 + Math.floor(Math.random() * MAX_STUDENT_EXCHANGES); // random 1-3
+          addressedStudent = null; // reset — will be set in onTeacherSpeechEnd if a name is detected
+          interruptedStudent = null;
           clearAllBuffers();
           sessionMap.forEach(sess => {
             try { sess.sendRealtimeInput({ media: { data: b64, mimeType: 'audio/pcm;rate=16000' } }); } catch (_) {}
@@ -1403,6 +1491,9 @@ async function main() {
             teacherIsSpeaking = true;
             teacherHasSpoken = true;
             lastTeacherSpeechAt = Date.now();
+            // Note: interruption is NOT triggered here — speech_start fires on any noise.
+            // Real interruption is triggered in the inputTranscription handler when actual
+            // teacher words are transcribed while a student is speaking.
             return;
           }
           if (parsed.type === 'speech_end') {
@@ -1529,6 +1620,8 @@ async function main() {
             teacherIsSpeaking = true;
             teacherHasSpoken = true;
             lastTeacherSpeechAt = Date.now();
+            // Note: interruption is NOT triggered here — speech_start fires on any noise.
+            // Real interruption is triggered in the inputTranscription handler.
             return;
           }
           if (msg.type === 'speech_end') {
