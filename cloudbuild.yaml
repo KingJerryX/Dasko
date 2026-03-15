@@ -26,6 +26,8 @@ steps:
       - --min-instances=0
       - --max-instances=3
       - --memory=512Mi
+      - --timeout=900
+      - --session-affinity
       - --set-env-vars=GEMINI_API_KEY=$$GEMINI_API_KEY
     secretEnv: ['GEMINI_API_KEY']
 

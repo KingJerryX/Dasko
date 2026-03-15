@@ -2054,8 +2054,13 @@ function disconnect(keepScreen = false) {
   disableCameraFloating();
 
   if (!keepScreen) {
-    if (lastError) setStatus(lastError, "error");
-    setTimeout(showSetup, 800);
+    if (lastError) {
+      setStatus(lastError, "error");
+      // Give user time to read the error message before returning to setup
+      setTimeout(showSetup, 4000);
+    } else {
+      setTimeout(showSetup, 800);
+    }
   }
 }
 

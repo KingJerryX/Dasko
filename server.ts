@@ -980,7 +980,7 @@ async function main() {
   });
 
   const port = Number(process.env.PORT) || 8000;
-  const server = serve({ fetch: app.fetch, port });
+  const server = serve({ fetch: app.fetch, port, hostname: '0.0.0.0' });
 
   const wss = new WebSocketServer({ server });
 
@@ -1021,7 +1021,7 @@ async function main() {
     let lastTeacherSpeechAt  = Date.now();   // timestamp of last speech_start or speech_end; init to now so initial frames aren't gated
     let teacherIsSpeaking    = false;       // true between speech_start and speech_end
     let teacherHasSpoken     = false;       // anti-hallucination: ignore inputTranscription until first real speech_start
-    const sessionStartedAt   = Date.now();  // anti-hallucination: discard audio for first 2s to avoid ambient noise triggering VAD
+    let   sessionStartedAt   = Date.now();  // anti-hallucination: discard audio for first N seconds; reset in onopen so Cloud Run latency doesn't eat the window
 
     // Deferred session start: client sends material_file(s) then ready_to_start; we merge file content into materials before creating Live session.
     const pendingMaterialFiles: { name: string; base64: string; mimeType: string }[] = [];
@@ -1151,6 +1151,7 @@ async function main() {
             callbacks: {
               onopen:  () => {
                 console.log(`[Dasko] ${id} session opened`);
+                sessionStartedAt = Date.now(); // reset so audio blackout window starts from Live session ready
                 if (id === studentIds[0]) {
                   sendJson({ type: 'session_ready' });
                   sendJson({ type: 'info', message: `Your classroom is ready. Start explaining: ${topic}` });
@@ -1255,8 +1256,16 @@ async function main() {
                   }
                 }
               },
-              onerror: (e: ErrorEvent) => console.error(`[Dasko] ${id} error:`, e.message ?? JSON.stringify(e)),
-              onclose: (e: CloseEvent) => console.log(`[Dasko] ${id} closed:`, e.code),
+              onerror: (e: ErrorEvent) => {
+                console.error(`[Dasko] ${id} error:`, e.message ?? JSON.stringify(e));
+                sendJson({ type: 'error', message: `${id} session error: ${e.message ?? 'unknown'}` });
+              },
+              onclose: (e: CloseEvent) => {
+                console.log(`[Dasko] ${id} closed:`, e.code, e.reason || '');
+                sendJson({ type: 'error', message: `${id} session ended (code ${e.code}${e.reason ? ': ' + e.reason : ''})` });
+                // Give the error message time to reach the client before closing
+                setTimeout(() => { if (socket.readyState === WebSocket.OPEN) socket.close(); }, 500);
+              },
             },
           });
 
@@ -1268,7 +1277,8 @@ async function main() {
       } catch (e: any) {
         console.error('[Dasko] Failed to create classroom sessions:', e);
         sendJson({ type: 'error', message: `Failed to connect: ${e.message}` });
-        socket.close();
+        // Give the error message time to reach the client before closing
+        setTimeout(() => { if (socket.readyState === WebSocket.OPEN) socket.close(); }, 500);
         return;
       }
     } else {
@@ -1287,6 +1297,7 @@ async function main() {
           callbacks: {
             onopen: () => {
               console.log('[Dasko] Live session opened, topic:', topic);
+              sessionStartedAt = Date.now(); // reset so audio blackout window starts from Live session ready
               sendJson({ type: 'session_ready' });
               sendJson({ type: 'info', message: `Your student is ready. Start explaining: ${topic}` });
               setTimeout(() => {
@@ -1331,7 +1342,9 @@ async function main() {
             },
             onclose: (e: CloseEvent) => {
               console.log('[Dasko] Live session closed:', e.code, e.reason || '');
-              if (socket.readyState === WebSocket.OPEN) socket.close();
+              sendJson({ type: 'error', message: `Live session ended (code ${e.code}${e.reason ? ': ' + e.reason : ''})` });
+              // Give the error message time to reach the client before closing
+              setTimeout(() => { if (socket.readyState === WebSocket.OPEN) socket.close(); }, 500);
             },
           },
         });
@@ -1339,7 +1352,8 @@ async function main() {
       } catch (e: any) {
         console.error('[Dasko] Failed to connect to Live API:', e);
         sendJson({ type: 'error', message: `Failed to connect: ${e.message}` });
-        socket.close();
+        // Give the error message time to reach the client before closing
+        setTimeout(() => { if (socket.readyState === WebSocket.OPEN) socket.close(); }, 500);
         return;
       }
     }
@@ -1370,8 +1384,10 @@ async function main() {
       // Session ready: route to classroom or solo
       if (sessionMap) {
         if (isBinary) {
-          // Anti-hallucination: discard audio in first 3s to avoid ambient noise triggering model
-          if (Date.now() - sessionStartedAt < 3000) return;
+          // Anti-hallucination: discard audio in first 1.5s after Live session ready
+          if (Date.now() - sessionStartedAt < 1500) return;
+          // Binary audio only arrives when frontend VAD detected speech — reliable teacher-speaking signal
+          teacherHasSpoken = true;
           const b64 = data.toString('base64');
           studentsAllowed = true;
           consecutiveStudentTurns = 0;
@@ -1497,8 +1513,10 @@ async function main() {
 
       if (session) {
         if (isBinary) {
-          // Anti-hallucination: discard audio in first 3s to avoid ambient noise triggering model
-          if (Date.now() - sessionStartedAt < 3000) return;
+          // Anti-hallucination: discard audio in first 1.5s after Live session ready
+          if (Date.now() - sessionStartedAt < 1500) return;
+          // Binary audio only arrives when frontend VAD detected speech — reliable teacher-speaking signal
+          teacherHasSpoken = true;
           const base64 = data.toString('base64');
           try { session.sendRealtimeInput({ media: { data: base64, mimeType: 'audio/pcm;rate=16000' } }); } catch (e) {
             console.error('[Dasko] sendRealtimeInput failed:', e);
@@ -1625,7 +1643,7 @@ async function main() {
     });
   });
 
-  console.log(`Dasko running on http://localhost:${port}`);
+  console.log(`Dasko running on http://0.0.0.0:${port}`);
 }
 
 main();
