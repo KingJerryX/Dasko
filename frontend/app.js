@@ -193,6 +193,8 @@ let playbackGainNode = null;
 let nextPlayTime     = 0;
 let activeSources    = [];    // track AudioBufferSourceNodes for interruption
 let suppressAudio    = false; // suppress student audio when teacher is interrupting
+let lastAudioChunkAt = 0;    // timestamp of last queued audio chunk (echo guard grace period)
+let micStartedAt     = 0;    // timestamp when mic started (VAD warm-up grace period)
 let audioChunksReceived = 0;
 let currentOrbState  = "idle";
 let activeSpeakerName = "";
@@ -873,11 +875,12 @@ async function playPcm24k(arrayBuffer) {
     }
     src.connect(playbackGainNode);
     const now = playbackContext.currentTime;
-    if (nextPlayTime < now) nextPlayTime = now;
+    if (nextPlayTime < now) nextPlayTime = now + 0.08; // 80ms jitter buffer to prevent audio pops from chunk gaps
     src.start(nextPlayTime);
     nextPlayTime += buf.duration;
     // Track source for interruption
     activeSources.push(src);
+    lastAudioChunkAt = Date.now();
     src.onended = () => {
       const idx = activeSources.indexOf(src);
       if (idx !== -1) activeSources.splice(idx, 1);
@@ -893,6 +896,7 @@ function interruptPlayback() {
   activeSources = [];
   nextPlayTime = 0;
   audioChunksReceived = 0;
+  lastAudioChunkAt = 0; // genuine interruption — clear grace period
 }
 
 function stopPlayback() {
@@ -1762,6 +1766,7 @@ function attachMicResumeOnGesture() {
 }
 
 async function startMic(existingStream = null) {
+  micStartedAt = Date.now();
   micStream = existingStream || await navigator.mediaDevices.getUserMedia({ audio: true });
   // Use only the audio tracks to avoid re-stopping video tracks on disconnect
   const audioOnlyStream = new MediaStream(micStream.getAudioTracks());
@@ -1790,7 +1795,7 @@ async function startMic(existingStream = null) {
     // the mic picks up echo. Use a higher threshold so only real teacher
     // speech (not echo) triggers VAD. This prevents false interruptions
     // AND hallucinated teacher turns from echo being sent to Gemini.
-    const studentIsPlaying = activeSources.length > 0;
+    const studentIsPlaying = activeSources.length > 0 || (Date.now() - lastAudioChunkAt < 500);
     const effectiveThreshold = studentIsPlaying
       ? SPEECH_ENERGY_THRESHOLD * ECHO_GUARD_MULTIPLIER
       : SPEECH_ENERGY_THRESHOLD;
@@ -1806,8 +1811,12 @@ async function startMic(existingStream = null) {
         // Instantly kill student audio — mirrors Gemini Live Studio behavior.
         // The echo guard threshold above ensures this only fires on real
         // teacher speech, not speaker echo picked up by the mic.
-        interruptPlayback();
-        suppressAudio = true;
+        // Skip interruption during VAD warm-up: mic startup noise/pop can
+        // falsely trigger this and kill the initial greeting audio.
+        if (Date.now() - micStartedAt > 2000) {
+          interruptPlayback();
+          suppressAudio = true;
+        }
       }
       vadSilenceCount = 0;
     } else if (vadInSpeech) {
