@@ -16,6 +16,16 @@ import {
   removeMaterialFile,
   resolveMaterialsContext,
 } from './server/materials-store';
+import {
+  analyzePdfWithVision,
+  analyzeImageWithVision,
+  formatForContext,
+} from './server/materials-vision';
+import {
+  processVideoMaterial,
+  formatVideoForContext,
+  isVideoMime,
+} from './server/materials-video';
 
 dotenv.config();
 
@@ -164,8 +174,9 @@ function getClassroomInstruction(topic: string, studentIds: string[], materials:
     .map(id => `- **${id.charAt(0).toUpperCase() + id.slice(1)}**: ${STUDENT_PROFILES[id]}`)
     .join('\n');
 
+  const hasVisualElements = materials.includes('### Visual Elements') || materials.includes('### Visual Summary');
   const materialsSection = materials.trim()
-    ? `The students have the following notes/documents (PDFs, slides, etc.) as reference. They didn't fully understand them:\n\n---\n${materials.trim()}\n---\n\nThey should reference this naturally as their notes/handouts, not recite verbatim.`
+    ? `The students have the following notes/documents (PDFs, slides, videos, etc.) as reference. They didn't fully understand them:\n\n---\n${materials.trim()}\n---\n\nThey should reference this naturally as their notes/handouts, not recite verbatim.${hasVisualElements ? '\nWhen referencing visual elements from the materials, use the exact labels (e.g., "Figure 3 on page 5", "the chart showing...") so the teacher knows what you\'re referring to.' : ''}`
     : `The students have general background knowledge but haven't formally studied this topic.`;
 
   return `You are playing ${studentIds.length} students in a live classroom session. The human is the teacher explaining "${topic}".
@@ -231,8 +242,9 @@ const PERSONA_TRAITS: Record<string, string> = {
 function getStudentInstruction(topic: string, persona: string, materials: string, video: boolean, language: string): string {
   const personaTrait = PERSONA_TRAITS[persona] || PERSONA_TRAITS.eager;
 
+  const hasVisualElements = materials.includes('### Visual Elements') || materials.includes('### Visual Summary');
   const materialsSection = materials.trim()
-    ? `You have the teacher's notes and documents below (PDFs, slides, etc. — kept as reference). You've gone through them but didn't fully understand everything — some parts confused you or didn't stick:\n\n---\n${materials.trim()}\n---\n\nRefer to these naturally as **your notes**: "In the handout it said… but I didn't get…" or "The slide about X — is that the same as what you're saying?" Do not recite long passages; treat them as something you half-understood and want the teacher to clarify.`
+    ? `You have the teacher's notes and documents below (PDFs, slides, videos, etc. — kept as reference). You've gone through them but didn't fully understand everything — some parts confused you or didn't stick:\n\n---\n${materials.trim()}\n---\n\nRefer to these naturally as **your notes**: "In the handout it said… but I didn't get…" or "The slide about X — is that the same as what you're saying?" Do not recite long passages; treat them as something you half-understood and want the teacher to clarify.${hasVisualElements ? '\nWhen referencing visual elements from the materials, use the exact labels (e.g., "Figure 3 on page 5", "the chart showing...") so the teacher knows what you\'re referring to.' : ''}`
     : `You have general background knowledge from school and everyday life, but you haven't formally studied this topic. You may have vague familiarity with some terms or ideas, but your understanding is patchy and you have real gaps.`;
 
   return `You are a student in a "learn by teaching" session. The human is your teacher. They are going to explain "${topic}" to you.
@@ -308,8 +320,9 @@ function getClassroomStudentInstruction(topic: string, studentId: string, allStu
     .map(id => `- **${id.charAt(0).toUpperCase() + id.slice(1)}**: ${STUDENT_PROFILES[id]}`)
     .join('\n');
 
+  const hasVisualElements = materials.includes('### Visual Elements') || materials.includes('### Visual Summary');
   const materialsSection = materials.trim()
-    ? `You have the following notes/documents as reference (from the teacher). You've read through but didn't fully understand:\n\n---\n${materials.trim()}\n---\n\nReference naturally as your notes — "In the handout…" / "On the slide…" — not verbatim recital.`
+    ? `You have the following notes/documents as reference (from the teacher). You've read through but didn't fully understand:\n\n---\n${materials.trim()}\n---\n\nReference naturally as your notes — "In the handout…" / "On the slide…" — not verbatim recital.${hasVisualElements ? '\nWhen referencing visual elements, use exact labels (e.g., "Figure 3 on page 5") so the teacher knows what you mean.' : ''}`
     : `You have general background knowledge from school and everyday life, but you haven't formally studied this topic. Your understanding is patchy and you have real gaps.`;
 
   return `You are ${name}, a student in a live classroom session. The human is the teacher explaining "${topic}".
@@ -636,10 +649,20 @@ async function generateStudentDiagram(
 
 // ── On-demand diagram detection ─────────────────────────────────────────────
 
-const DIAGRAM_REQUEST_PATTERN = /\b(draw|sketch|diagram|illustrat|visuali[sz]|generate\s+(a\s+)?(diagram|image|picture|sketch|drawing)|show\s+me\s+(a\s+)?(diagram|sketch|drawing|picture)|can\s+you\s+draw|make\s+(a\s+)?(diagram|sketch|drawing))\b/i;
+// Only trigger diagram generation on EXPLICIT teacher requests — not incidental
+// words like "draw a conclusion" or "illustrate my point". Requires a clear
+// action verb + visual noun directed at the student.
+const DIAGRAM_REQUEST_PATTERNS = [
+  /\b(draw|sketch|make|create|generate)\s+(me\s+)?(a\s+)?(diagram|picture|image|drawing|sketch|chart|graph|flowchart|figure|illustration)\b/i,
+  /\bshow\s+(me\s+)?(a\s+)?(diagram|picture|sketch|drawing|chart|graph|flowchart|figure|illustration)\b/i,
+  /\bcan\s+you\s+(draw|sketch|make|create|generate)\b/i,
+  /\b(put|write|draw)\s+(it|that|this)\s+(on|on the)\s+(the\s+)?(board|whiteboard)\b/i,
+  /\bshow\s+(me\s+|us\s+)?(your\s+)?work\b/i,
+  /\bvisuali[sz]e\s+(it|this|that)\b/i,
+];
 
 function isDiagramRequest(text: string): boolean {
-  return DIAGRAM_REQUEST_PATTERN.test(text);
+  return DIAGRAM_REQUEST_PATTERNS.some(p => p.test(text));
 }
 
 // ── Vision refresh detection ────────────────────────────────────────────────
@@ -721,8 +744,38 @@ async function main() {
 
   async function extractMaterialTextWithFallback(name: string, base64: string, mimeType: string, maxChars: number): Promise<{ content: string; error?: string }> {
     const buf = Buffer.from(base64, 'base64');
+    const lower = name.toLowerCase();
+    const isPdf = mimeType === 'application/pdf' || lower.endsWith('.pdf');
+    const isImage = isImageLikeFile(mimeType, name);
+    const isVideo = isVideoMime(mimeType);
+
+    // ── Vision path for PDFs, images, and videos ──
+    if (isPdf || isImage || isVideo) {
+      try {
+        if (isVideo) {
+          const videoResult = await processVideoMaterial(ai, buf, name, mimeType);
+          const formatted = formatVideoForContext(videoResult);
+          return { content: formatted.slice(0, maxChars) };
+        }
+        if (isPdf) {
+          const pdfResult = await analyzePdfWithVision(ai, buf, name);
+          const formatted = formatForContext(pdfResult);
+          return { content: formatted.slice(0, maxChars) };
+        }
+        if (isImage) {
+          const imageResult = await analyzeImageWithVision(ai, buf, mimeType, name);
+          const formatted = formatForContext(imageResult);
+          return { content: formatted.slice(0, maxChars) };
+        }
+      } catch (e: any) {
+        console.error(`[Dasko] Vision analysis failed for ${name}, falling back to text:`, e.message);
+        // Fall through to legacy extraction
+      }
+    }
+
+    // ── Legacy text extraction path ──
     let { text, error } = await extractFromBuffer(buf, mimeType, name);
-    if (!text.trim() && isImageLikeFile(mimeType, name)) {
+    if (!text.trim() && isImage) {
       const ocrText = await extractImageTextWithAi(buf, mimeType || 'image/jpeg');
       if (ocrText.trim()) {
         text = ocrText;
@@ -1007,7 +1060,7 @@ async function main() {
     const materialsId = url.searchParams.get('materialsId') || '';
     if (materialsId) {
       try {
-        const resolved = await resolveMaterialsContext(materialsId);
+        const resolved = await resolveMaterialsContext(materialsId, ai);
         if (resolved.trim()) materials = resolved;
       } catch (e) {
         console.error('[Dasko] resolveMaterialsContext', e);
@@ -1050,14 +1103,21 @@ async function main() {
       sendJson({ type: 'debug', level, message });
     }
 
-    /** Process material_file: extract text server-side and send as text only (no raw PDF/media) to avoid Live API "invalid argument" crash. */
+    /** Process material_file: use Gemini Vision to analyze content, then send as text to Live API. */
     async function processMaterialFile(name: string, base64: string, mimeType: string): Promise<string> {
-      const maxChars = 12_000; // keep realtime input lightweight for stability
-      const { content, error } = await extractMaterialTextWithFallback(name, base64, mimeType, maxChars);
-      if (content) {
-        return `[The teacher has shared a study material: "${name}".]\n\nContent:\n${content}`;
+      const maxChars = 20_000; // increased for vision-rich output
+      sendJson({ type: 'material_processing', filename: name });
+      try {
+        const { content, error } = await extractMaterialTextWithFallback(name, base64, mimeType, maxChars);
+        sendJson({ type: 'material_processed', filename: name });
+        if (content) {
+          return `[The teacher has shared a study material: "${name}".]\n\nContent:\n${content}`;
+        }
+        return `[The teacher has shared a file: "${name}".]${error ? ` (${error})` : ''}`;
+      } catch (e: any) {
+        sendJson({ type: 'material_processed', filename: name });
+        return `[The teacher has shared a file: "${name}".] (analysis failed: ${e.message})`;
       }
-      return `[The teacher has shared a file: "${name}".]${error ? ` (${error})` : ''}`;
     }
 
     async function onTeacherSpeechEnd(media?: { camera?: boolean; whiteboard?: boolean; screen?: boolean }) {
@@ -1170,18 +1230,30 @@ async function main() {
     // (Diagram generation is on-demand only — no auto-generation state needed)
     let diagramPopupOpen = false; // when true, skip regular video frames (diagram frames take priority)
 
-    /** Build full materials string (URL materials + extracted text from pending files), then create Live session(s) and send session_ready from onopen. */
+    /** Build full materials string (URL materials + vision-analyzed pending files), then create Live session(s). */
     async function startSessionWithMaterials() {
       let fullMaterials = materials;
-      for (const f of pendingMaterialFiles) {
-        try {
-          const { content } = await extractMaterialTextWithFallback(f.name, f.base64, f.mimeType, MAX_MATERIALS_CHARS);
-          if (content) {
-            const chunk = content.slice(0, MAX_MATERIALS_CHARS);
-            fullMaterials += '\n\n---\n[From file: ' + f.name + ']\n' + chunk;
+      const total = pendingMaterialFiles.length;
+
+      // Process files in parallel with vision analysis
+      if (total > 0) {
+        sendJson({ type: 'info', message: `Analyzing ${total} file${total > 1 ? 's' : ''} with AI vision...` });
+        const results = await Promise.allSettled(
+          pendingMaterialFiles.map(async (f, idx) => {
+            sendJson({ type: 'material_progress', filename: f.name, status: 'processing', current: idx + 1, total });
+            const { content } = await extractMaterialTextWithFallback(f.name, f.base64, f.mimeType, MAX_MATERIALS_CHARS);
+            sendJson({ type: 'material_progress', filename: f.name, status: 'done', current: idx + 1, total });
+            return { name: f.name, content };
+          })
+        );
+        for (const r of results) {
+          if (r.status === 'fulfilled' && r.value.content) {
+            const chunk = r.value.content.slice(0, MAX_MATERIALS_CHARS);
+            fullMaterials += '\n\n---\n[From file: ' + r.value.name + ']\n' + chunk;
           }
-        } catch (_) {}
+        }
       }
+
       if (fullMaterials.length > MAX_MATERIALS_CHARS * 2) {
         fullMaterials = fullMaterials.slice(0, MAX_MATERIALS_CHARS * 2) + '\n\n[… truncated …]';
       }
@@ -1195,7 +1267,10 @@ async function main() {
         clearAllBuffers();
 
       try {
-        const entries = await Promise.all(studentIds.map(async id => {
+        // Stagger session creation to avoid hitting Gemini rate limits
+        const entries: [string, any][] = [];
+        for (const id of studentIds) {
+          if (entries.length > 0) await new Promise(r => setTimeout(r, 800)); // 800ms delay between sessions
           const voice = STUDENT_VOICES[id] || 'Zephyr';
           const cfg: types.LiveConnectConfig = {
             responseModalities: [Modality.AUDIO],
@@ -1364,14 +1439,21 @@ async function main() {
                 console.log(`[Dasko] ${id} closed:`, e.code, e.reason || '');
                 sendDebug('error', `Gemini session closed for ${id}: code ${e.code}${e.reason ? ', reason: ' + e.reason : ''}`);
                 sendJson({ type: 'error', message: `${id} session ended (code ${e.code}${e.reason ? ': ' + e.reason : ''})` });
-                // Give the error message time to reach the client before closing
-                setTimeout(() => { if (socket.readyState === WebSocket.OPEN) socket.close(); }, 500);
+                // Remove the dead session from the map instead of killing the whole WebSocket
+                if (sessionMap) {
+                  sessionMap.delete(id);
+                  if (activeSpeaker === id) { activeSpeaker = null; }
+                  // Only close the WebSocket if ALL sessions are gone
+                  if (sessionMap.size === 0) {
+                    setTimeout(() => { if (socket.readyState === WebSocket.OPEN) socket.close(); }, 500);
+                  }
+                }
               },
             },
           });
 
-          return [id, sess] as const;
-        }));
+          entries.push([id, sess] as const);
+        }
 
         sessionMap = new Map(entries);
         sessionReady = true;
@@ -1420,9 +1502,11 @@ async function main() {
                   sendJson({ type: 'teacher_transcript', text: chunk });
                 }
               }
-              // Solo mode: no server-side interruption suppression needed.
-              // Gemini Live API handles barge-in natively — the model stops
-              // generating audio when it hears teacher input.
+              // Solo mode: when teacher is speaking, suppress student audio at
+              // the server level to prevent in-flight chunks from reaching the
+              // frontend. Gemini's native barge-in stops generation, but chunks
+              // already in the pipeline still arrive. Transcript is still
+              // forwarded so the partial text is preserved.
               if (message.serverContent?.outputTranscription?.text) {
                 const chunk = enforceTranscriptLanguage(message.serverContent.outputTranscription.text, language);
                 if (chunk) {

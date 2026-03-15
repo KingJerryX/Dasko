@@ -62,6 +62,7 @@ const reflectionVisualsGestures = document.getElementById("reflectionVisualsGest
 const reflectionExplanations = document.getElementById("reflectionExplanations");
 const reflectionMediaUsage  = document.getElementById("reflectionMediaUsage");
 const teachAgainBtn   = document.getElementById("teachAgainBtn");
+const continueTeachingBtn = document.getElementById("continueTeachingBtn");
 const changeTopicBtn  = document.getElementById("changeTopicBtn");
 const reflectionLoadingScreen = document.getElementById("reflection-loading-screen");
 const transcriptPanel  = document.getElementById("transcriptPanel");
@@ -242,6 +243,10 @@ const RECV_SAMPLE_RATE        = 24000;
 const BUFFER_SIZE             = 2048;
 const SILENCE_BUFFERS_BEFORE_END = 18;
 const SPEECH_ENERGY_THRESHOLD = 0.006;
+// When student audio is playing through speakers, the mic picks up echo.
+// Use a higher threshold during playback so only real teacher speech triggers VAD,
+// not speaker echo. This prevents both false interruptions and hallucinated teacher turns.
+const ECHO_GUARD_MULTIPLIER   = 5; // 0.006 * 5 = 0.03 (echo ~0.01-0.02, real speech ~0.05+)
 
 let vadInSpeech     = false;
 let vadSilenceCount = 0;
@@ -595,12 +600,14 @@ const ACCEPTED_TYPES = new Set([
   "application/pdf",
   "image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp",
   "text/plain", "text/markdown", "text/csv",
+  "video/mp4", "video/quicktime", "video/webm", "video/x-msvideo", "video/mpeg",
 ]);
-const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
+const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB (increased for video support)
 
 function getFileIcon(mimeType) {
   if (mimeType === "application/pdf") return "\u{1F4C4}";
   if (mimeType.startsWith("image/"))  return "\u{1F5BC}";
+  if (mimeType.startsWith("video/"))  return "\u{1F3AC}";
   return "\u{1F4DD}";
 }
 
@@ -676,6 +683,10 @@ async function processFiles(files) {
       else if (ext === "png") mimeType = "image/png";
       else if (ext === "gif") mimeType = "image/gif";
       else if (ext === "webp") mimeType = "image/webp";
+      else if (ext === "mp4") mimeType = "video/mp4";
+      else if (ext === "mov") mimeType = "video/quicktime";
+      else if (ext === "webm") mimeType = "video/webm";
+      else if (ext === "avi") mimeType = "video/x-msvideo";
     }
 
     if (!ACCEPTED_TYPES.has(mimeType)) {
@@ -1588,11 +1599,14 @@ if (toggleCoachingBtn) {
 }
 
 // ── In-session file drop and upload ─────────────────────────────────────────
-function showSessionToast(message) {
+function showSessionToast(message, style) {
   if (!sessionToast) return;
   sessionToast.textContent = message;
-  sessionToast.classList.add("visible");
-  setTimeout(() => sessionToast.classList.remove("visible"), 2800);
+  sessionToast.className = "session-toast visible" + (style ? " toast-" + style : "");
+}
+function hideSessionToast() {
+  if (!sessionToast) return;
+  sessionToast.classList.remove("visible");
 }
 
 async function sendSessionMaterialFile(file) {
@@ -1617,6 +1631,7 @@ async function sendSessionMaterialFile(file) {
     try {
       ws.send(JSON.stringify({ type: "material_file", name: file.name, mimeType: mimeType || "application/octet-stream", base64 }));
       showSessionToast(`Shared "${file.name}" with class`);
+      setTimeout(() => hideSessionToast(), 2800);
       updateActivity();
     } catch (_) {}
   }
@@ -1756,7 +1771,16 @@ async function startMic(existingStream = null) {
     for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
     const rms = Math.sqrt(sum / input.length);
 
-    if (rms > SPEECH_ENERGY_THRESHOLD) {
+    // Dynamic threshold: when student audio is playing through speakers,
+    // the mic picks up echo. Use a higher threshold so only real teacher
+    // speech (not echo) triggers VAD. This prevents false interruptions
+    // AND hallucinated teacher turns from echo being sent to Gemini.
+    const studentIsPlaying = activeSources.length > 0;
+    const effectiveThreshold = studentIsPlaying
+      ? SPEECH_ENERGY_THRESHOLD * ECHO_GUARD_MULTIPLIER
+      : SPEECH_ENERGY_THRESHOLD;
+
+    if (rms > effectiveThreshold) {
       resetIdleTimer();
       lastSpeechFrameTime = Date.now();
       if (!vadInSpeech) {
@@ -1764,11 +1788,9 @@ async function startMic(existingStream = null) {
         setMicActive(true);
         if (currentOrbState !== "speaking") setOrbState("listening");
         try { ws.send(JSON.stringify({ type: "speech_start" })); } catch (_) {}
-        // Instantly kill any student audio that's currently playing.
-        // This is frontend-only: stops queued AudioBufferSourceNodes so the
-        // teacher doesn't hear the student rambling over them.
-        // suppressAudio blocks any in-flight chunks still arriving via WebSocket.
-        // Reset happens on speech_end so the next student response plays fine.
+        // Instantly kill student audio — mirrors Gemini Live Studio behavior.
+        // The echo guard threshold above ensures this only fires on real
+        // teacher speech, not speaker echo picked up by the mic.
         interruptPlayback();
         suppressAudio = true;
       }
@@ -1781,7 +1803,7 @@ async function startMic(existingStream = null) {
         lastSpeechFrameTime = Date.now();
         setMicActive(!micMuted);
         if (currentOrbState !== "speaking") setOrbState("thinking");
-        suppressAudio = false; // teacher stopped — allow student audio again
+        suppressAudio = false; // teacher stopped — allow next student response
         try { ws.send(JSON.stringify({ type: "speech_end", media: { camera: cameraEnabled, whiteboard: whiteboardEnabled, screen: screenEnabled } })); } catch (_) {}
 
         lastTeacherFinalizedAt = Date.now();
@@ -2327,6 +2349,22 @@ async function connect() {
       // Server-pushed debug events
       if (msg.type === "debug") { debugLog(msg.level || 'info', msg.message || ''); }
 
+      // Material processing progress (pre-session vision analysis)
+      if (msg.type === "material_progress") {
+        const loadingText = document.querySelector("#setup-classroom-loading .setup-loading-text");
+        if (loadingText) {
+          loadingText.textContent = `Analyzing ${msg.filename} (${msg.current}/${msg.total})…`;
+        }
+      }
+      // In-session material processing (file dropped mid-session)
+      if (msg.type === "material_processing") {
+        showSessionToast(`Analyzing ${msg.filename}…`, "processing");
+      }
+      if (msg.type === "material_processed") {
+        showSessionToast(`${msg.filename} ready ✓`, "success");
+        setTimeout(() => hideSessionToast(), 3000);
+      }
+
 
       // Teacher transcript: new teacher turn — close any open student entry first.
       if (msg.type === "teacher_transcript" && msg.text) {
@@ -2639,7 +2677,8 @@ teachAgainBtn.addEventListener("click", () => {
 
 changeTopicBtn.addEventListener("click", () => {
   reflectionScreen.style.display = "none";
-  showSetup();
+  if (reflectionLoadingScreen) reflectionLoadingScreen.classList.remove("visible");
+  disconnect();  // clean up ws, mic, playback before returning to setup
 });
 
 // ── Firebase ─────────────────────────────────────────────────────────────────
