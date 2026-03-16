@@ -2248,6 +2248,11 @@ function disconnect(keepScreen = false) {
   if (frameInterval) { clearInterval(frameInterval); frameInterval = null; }
   stopTimer();
   stopPlayback();
+  // Close diagram popup if open
+  const diagPopup = document.getElementById("diagramPopup");
+  if (diagPopup) diagPopup.classList.remove("visible");
+  diagramPopupOpen = false;
+  stopDiagramFrameSending();
   stopIdleCheck();
   if (idleCountdownInterval) { clearInterval(idleCountdownInterval); idleCountdownInterval = null; }
   hideTimeoutModal();
