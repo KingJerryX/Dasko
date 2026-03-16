@@ -2250,9 +2250,14 @@ function disconnect(keepScreen = false) {
   stopPlayback();
   // Close diagram popup if open
   const diagPopup = document.getElementById("diagramPopup");
-  if (diagPopup) diagPopup.classList.remove("visible");
+  if (diagPopup) {
+    diagPopup.classList.remove("visible", "diagram-fullscreen");
+    diagPopup.style.display = "none"; // force hide in case CSS class removal isn't enough
+  }
   diagramPopupOpen = false;
   stopDiagramFrameSending();
+  // Also clear any diagram thumbnail cards from the transcript
+  document.querySelectorAll(".t-diagram-card").forEach(el => el.remove());
   stopIdleCheck();
   if (idleCountdownInterval) { clearInterval(idleCountdownInterval); idleCountdownInterval = null; }
   hideTimeoutModal();
