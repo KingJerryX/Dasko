@@ -625,10 +625,13 @@ async function generateStudentDiagram(
     `- Think: what a student scribbles in 15 seconds on a whiteboard` +
     mistakeClause;
 
-  const timeoutPromise = new Promise<null>(resolve => setTimeout(() => {
-    console.log(`[Dasko] generateStudentDiagram: TIMEOUT for ${studentName}`);
-    resolve(null);
-  }, 30000));
+  let timeoutHandle: ReturnType<typeof setTimeout>;
+  const timeoutPromise = new Promise<null>(resolve => {
+    timeoutHandle = setTimeout(() => {
+      console.log(`[Dasko] generateStudentDiagram: TIMEOUT for ${studentName}`);
+      resolve(null);
+    }, 30000);
+  });
 
   const genPromise = (async () => {
     console.log(`[Dasko] generateStudentDiagram: starting for ${studentName}`);
@@ -654,8 +657,11 @@ async function generateStudentDiagram(
   })();
 
   try {
-    return await Promise.race([genPromise, timeoutPromise]);
+    const result = await Promise.race([genPromise, timeoutPromise]);
+    clearTimeout(timeoutHandle!); // cancel timeout if generation won the race
+    return result;
   } catch (err) {
+    clearTimeout(timeoutHandle!);
     console.error(`[Dasko] generateStudentDiagram error for ${studentName}:`, err);
     return null;
   }
@@ -675,11 +681,29 @@ const DIAGRAM_REQUEST_PATTERNS = [
   /\bvisuali[sz]e\s+(it|this|that)\b/i,
 ];
 
+/** Collapse broken transcript spacing: "dra w me a dia gram" → "draw me a diagram".
+ *  Gemini's input transcription sometimes splits words across chunks, producing
+ *  single-letter fragments separated by spaces. This rejoins them. */
+function collapseTranscriptSpacing(text: string): string {
+  // Rejoin isolated single-letter fragments: "dra w" → "draw", "dia gram" → "diagram"
+  // Pattern: a letter, space, then a single letter followed by space or end — glue them.
+  // Run multiple passes since fragments can chain: "d i a g r a m" → "diagram"
+  let prev = '';
+  let out = text;
+  while (out !== prev) {
+    prev = out;
+    // Join: word-char + space + single-char (followed by space, punctuation, or end)
+    out = out.replace(/(\w) (\w)(?= |\b|[.,!?;:]|$)/g, '$1$2');
+  }
+  return out;
+}
+
 function isDiagramRequest(text: string): boolean {
-  const matched = DIAGRAM_REQUEST_PATTERNS.some(p => p.test(text));
-  console.log(`[Dasko][DiagramDetect] isDiagramRequest("${text.slice(0, 120)}") → ${matched}`);
+  const normalized = collapseTranscriptSpacing(text);
+  const matched = DIAGRAM_REQUEST_PATTERNS.some(p => p.test(normalized));
+  console.log(`[Dasko][DiagramDetect] isDiagramRequest("${normalized.slice(0, 120)}") → ${matched}${normalized !== text ? ` [normalized from: "${text.slice(0, 80)}"]` : ''}`);
   if (matched) {
-    const pattern = DIAGRAM_REQUEST_PATTERNS.find(p => p.test(text));
+    const pattern = DIAGRAM_REQUEST_PATTERNS.find(p => p.test(normalized));
     console.log(`[Dasko][DiagramDetect] Matched pattern: ${pattern}`);
   }
   return matched;
@@ -689,7 +713,7 @@ function isDiagramRequest(text: string): boolean {
 const VISION_REFRESH_PATTERN = /\b(can you see|do you see|what do you see|look at this|are you seeing|are you looking|what am i showing)\b/i;
 
 function isVisionRefreshRequest(text: string): boolean {
-  return VISION_REFRESH_PATTERN.test(text);
+  return VISION_REFRESH_PATTERN.test(collapseTranscriptSpacing(text));
 }
 
 function triggerOnDemandDiagram(
@@ -703,10 +727,13 @@ function triggerOnDemandDiagram(
 ) {
   console.log(`[Dasko][DiagramGen] triggerOnDemandDiagram called | student=${studentName} | topic="${topic}" | text="${teacherText.slice(0, 100)}"`);
 
-  // Tell the student to acknowledge the request verbally
+  // Tell the student to acknowledge the request verbally.
+  // IMPORTANT: The native-audio model doesn't know it can generate images (a separate
+  // model handles that). Without strong instruction, it says "I can't draw." The prompt
+  // must override this by framing it as role-play — the student IS drawing on a whiteboard.
   try {
     liveSession.sendRealtimeInput({
-      text: `[The teacher asked you to draw a diagram. Say something like "Sure, let me sketch that out!" or "Okay, give me a sec to draw this." Keep it short and natural. A diagram image will appear for the teacher automatically — do NOT describe what you're drawing.]`,
+      text: `[SYSTEM: The teacher asked you to draw a diagram. You HAVE a whiteboard and you ARE drawing on it right now. The diagram is being generated automatically. Your ONLY job is to say ONE short sentence acknowledging you're drawing — e.g. "Sure, let me sketch that out!" or "Okay, drawing it now!" Do NOT say you cannot draw. Do NOT say you don't have drawing capabilities. Do NOT describe what you're drawing. Just briefly acknowledge and wait.]`,
     });
     console.log(`[Dasko][DiagramGen] Sent acknowledgment prompt to ${studentName}'s Live session`);
   } catch (e: any) {
@@ -1720,7 +1747,7 @@ async function main() {
           if (parsed.type === 'diagram_popup_closed')  { diagramPopupOpen = false; }
           // Vision refresh screenshot — bypasses all gating, additive to session context
           if (parsed.type === 'vision_screenshot' && typeof parsed.base64 === 'string') {
-            const note = '[The teacher asked if you can see something. Here is a fresh screenshot of everything visible on screen right now. Look at it carefully and describe what you see. You still remember everything from the conversation so far.]';
+            const note = '[Fresh screenshot attached. Answer the teacher\'s question briefly — just confirm what you can see in 1-2 short sentences. Do NOT describe the whole image. Do NOT repeat yourself if you already answered a similar question.]';
             sessionMap.forEach(sess => {
               try {
                 sess.sendRealtimeInput({ media: { data: parsed.base64, mimeType: 'image/jpeg' } });
@@ -1844,7 +1871,7 @@ async function main() {
           if (msg.type === 'diagram_popup_closed')  { diagramPopupOpen = false; }
           // Vision refresh screenshot — bypasses all gating, additive to session context
           if (msg.type === 'vision_screenshot' && typeof msg.base64 === 'string') {
-            const note = '[The teacher asked if you can see something. Here is a fresh screenshot of everything visible on screen right now. Look at it carefully and describe what you see. You still remember everything from the conversation so far.]';
+            const note = '[Fresh screenshot attached. Answer the teacher\'s question briefly — just confirm what you can see in 1-2 short sentences. Do NOT describe the whole image. Do NOT repeat yourself if you already answered a similar question.]';
             try {
               session.sendRealtimeInput({ media: { data: msg.base64, mimeType: 'image/jpeg' } });
               session.sendRealtimeInput({ text: note });
