@@ -681,39 +681,73 @@ const DIAGRAM_REQUEST_PATTERNS = [
   /\bvisuali[sz]e\s+(it|this|that)\b/i,
 ];
 
-/** Collapse broken transcript spacing: "dra w me a dia gram" → "draw me a diagram".
- *  Gemini's input transcription sometimes splits words across chunks, producing
- *  single-letter fragments separated by spaces. This rejoins them. */
-function collapseTranscriptSpacing(text: string): string {
-  // Rejoin isolated single-letter fragments: "dra w" → "draw", "dia gram" → "diagram"
-  // Pattern: a letter, space, then a single letter followed by space or end — glue them.
-  // Run multiple passes since fragments can chain: "d i a g r a m" → "diagram"
-  let prev = '';
-  let out = text;
-  while (out !== prev) {
-    prev = out;
-    // Join: word-char + space + single-char (followed by space, punctuation, or end)
-    out = out.replace(/(\w) (\w)(?= |\b|[.,!?;:]|$)/g, '$1$2');
-  }
-  return out;
-}
+/** Spaceless key phrases for diagram detection fallback.
+ *  Gemini's input transcription often fragments words across chunks
+ *  (e.g. "gene ra te me a dia gram"). Regex on the raw text fails.
+ *  Fallback: strip ALL spaces from the text and check for these substrings. */
+const DIAGRAM_SPACELESS_PHRASES = [
+  // verb + (me +) (a +) noun — all lowercased, no spaces
+  ...[
+    'draw', 'sketch', 'make', 'create', 'generate',
+  ].flatMap(verb => [
+    'diagram', 'picture', 'image', 'drawing', 'sketch', 'chart',
+    'graph', 'flowchart', 'figure', 'illustration',
+  ].flatMap(noun => [
+    `${verb}${noun}`,       // "drawdiagram"
+    `${verb}a${noun}`,      // "drawadiagram"
+    `${verb}me${noun}`,     // "drawmediagram"
+    `${verb}mea${noun}`,    // "drawmeadiagram"
+  ])),
+  // "show me a ..."
+  ...[
+    'diagram', 'picture', 'sketch', 'drawing', 'chart',
+    'graph', 'flowchart', 'figure', 'illustration',
+  ].flatMap(noun => [`show${noun}`, `showme${noun}`, `showmea${noun}`]),
+  // "can you ..."
+  'canyoudraw', 'canyousketch', 'canyoumake', 'canyoucreate', 'canyougenerate',
+  // whiteboard
+  'putitontheboard', 'putitonthewhiteboard', 'putthisontheboard',
+  'putthatontheboard', 'drawitontheboard', 'drawitonthewhiteboard',
+  'writeitontheboard', 'writeitonthewhiteboard',
+  // other
+  'showmeyourwork', 'showusyourwork', 'showmework', 'showuswork',
+  'visualizeit', 'visualiseit', 'visualizethis', 'visualisethat',
+  'visualizethis', 'visualisethat',
+];
 
 function isDiagramRequest(text: string): boolean {
-  const normalized = collapseTranscriptSpacing(text);
-  const matched = DIAGRAM_REQUEST_PATTERNS.some(p => p.test(normalized));
-  console.log(`[Dasko][DiagramDetect] isDiagramRequest("${normalized.slice(0, 120)}") → ${matched}${normalized !== text ? ` [normalized from: "${text.slice(0, 80)}"]` : ''}`);
-  if (matched) {
-    const pattern = DIAGRAM_REQUEST_PATTERNS.find(p => p.test(normalized));
-    console.log(`[Dasko][DiagramDetect] Matched pattern: ${pattern}`);
+  // Primary: regex on original text (works when transcription is clean)
+  const regexMatch = DIAGRAM_REQUEST_PATTERNS.some(p => p.test(text));
+  if (regexMatch) {
+    const pattern = DIAGRAM_REQUEST_PATTERNS.find(p => p.test(text));
+    console.log(`[Dasko][DiagramDetect] isDiagramRequest → true (regex: ${pattern})`);
+    return true;
   }
-  return matched;
+  // Fallback: strip ALL spaces and check for key phrases.
+  // This handles badly fragmented transcription like "gene ra te me a dia gram".
+  const stripped = text.replace(/\s+/g, '').toLowerCase();
+  const phraseMatch = DIAGRAM_SPACELESS_PHRASES.find(p => stripped.includes(p));
+  if (phraseMatch) {
+    console.log(`[Dasko][DiagramDetect] isDiagramRequest → true (spaceless: "${phraseMatch}" found in "${stripped.slice(0, 80)}")`);
+    return true;
+  }
+  console.log(`[Dasko][DiagramDetect] isDiagramRequest("${text.slice(0, 120)}") → false`);
+  return false;
 }
 
 // ── Vision refresh detection ────────────────────────────────────────────────
 const VISION_REFRESH_PATTERN = /\b(can you see|do you see|what do you see|look at this|are you seeing|are you looking|what am i showing)\b/i;
+const VISION_SPACELESS_PHRASES = [
+  'canyousee', 'doyousee', 'whatdoyousee', 'lookatthis',
+  'areyouseeing', 'areyoulooking', 'whatamishowing',
+  'canyouseemy', 'canyouseethis', 'canyouseethat',
+  'doyouseemy', 'doyouseethis', 'doyouseethat',
+];
 
 function isVisionRefreshRequest(text: string): boolean {
-  return VISION_REFRESH_PATTERN.test(collapseTranscriptSpacing(text));
+  if (VISION_REFRESH_PATTERN.test(text)) return true;
+  const stripped = text.replace(/\s+/g, '').toLowerCase();
+  return VISION_SPACELESS_PHRASES.some(p => stripped.includes(p));
 }
 
 function triggerOnDemandDiagram(
