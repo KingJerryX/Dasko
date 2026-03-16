@@ -1764,13 +1764,12 @@ async function main() {
             }
           }
           if (parsed.type === 'video_frame' && typeof parsed.base64 === 'string') {
-            // Skip regular video frames when diagram popup is open (diagram frames take priority)
-            if (diagramPopupOpen) return;
-            // Relay all video frames — the frontend already handles rate-limiting
-            // (fast during speech, slow 1-per-8s for silent camera-only visual awareness)
+            // Always relay camera frames — even when diagram popup is open.
+            // Blocking them made the student completely blind to the camera
+            // during diagram review, breaking "can you see me" interactions.
             sessionMap.forEach(sess => { try { sess.sendRealtimeInput({ media: { data: parsed.base64, mimeType: 'image/jpeg' } }); } catch (_) {} });
           }
-          // Diagram annotation frames — no speech gating (teacher is actively drawing)
+          // Diagram annotation frames — sent alongside regular video frames when teacher draws
           if (parsed.type === 'diagram_frame' && typeof parsed.base64 === 'string') {
             sessionMap.forEach(sess => {
               try { sess.sendRealtimeInput({ media: { data: parsed.base64, mimeType: 'image/jpeg' } }); } catch (_) {}
@@ -1890,13 +1889,10 @@ async function main() {
             }
           }
           if (msg.type === 'video_frame' && typeof msg.base64 === 'string') {
-            // Skip regular video frames when diagram popup is open (diagram frames take priority)
-            if (diagramPopupOpen) return;
-            // Relay all video frames — the frontend already handles rate-limiting
-            // (fast during speech, slow 1-per-8s for silent camera-only visual awareness)
+            // Always relay camera frames — even when diagram popup is open.
             try { session.sendRealtimeInput({ media: { data: msg.base64, mimeType: 'image/jpeg' } }); } catch (_) {}
           }
-          // Diagram annotation frames — no speech gating
+          // Diagram annotation frames — sent alongside regular video frames when teacher draws
           if (msg.type === 'diagram_frame' && typeof msg.base64 === 'string') {
             try { session.sendRealtimeInput({ media: { data: msg.base64, mimeType: 'image/jpeg' } }); } catch (_) {}
           }
