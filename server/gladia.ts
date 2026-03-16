@@ -17,7 +17,7 @@ const LANG_MAP: Record<string, string> = {
   Portuguese:         'pt',
   Hindi:              'hi',
   Arabic:             'ar',
-  'Mandarin Chinese': 'zh',
+  'Simplified Chinese': 'zh',
 };
 
 export function mapLanguageCode(sessionLanguage: string): string | undefined {

@@ -127,7 +127,7 @@ const ALLOWED_SESSION_LANGUAGES = new Set([
   'Portuguese',
   'Hindi',
   'Arabic',
-  'Mandarin Chinese',
+  'Simplified Chinese',
 ]);
 
 function normalizeSessionLanguage(raw: string | null): string {
@@ -140,7 +140,7 @@ function isAllowedCharForLanguage(ch: string, language: string): boolean {
   if (/\s/u.test(ch) || /\p{Script=Common}/u.test(ch) || /\p{Script=Inherited}/u.test(ch)) return true;
   if (/\p{Number}/u.test(ch)) return true;
 
-  if (language === 'Mandarin Chinese') return /\p{Script=Han}/u.test(ch);
+  if (language === 'Simplified Chinese') return /\p{Script=Han}/u.test(ch);
   if (language === 'Hindi') return /\p{Script=Devanagari}/u.test(ch);
   if (language === 'Arabic') return /\p{Script=Arabic}/u.test(ch);
 
@@ -163,6 +163,12 @@ function enforceTranscriptLanguage(text: string, language: string): string {
 }
 
 function languageInstruction(language: string): string {
+  if (language === 'Simplified Chinese') {
+    return `## Language
+Use Simplified Chinese (简体中文) for your spoken responses in this session.
+You MUST use simplified Chinese characters exclusively — never use traditional Chinese characters (繁體字).
+Keep terminology natural for Simplified Chinese.`;
+  }
   return `## Language
 Use ${language} for your spoken responses in this session.
 Keep terminology natural for ${language}.`;
@@ -205,7 +211,7 @@ ${video ? GESTURE_INSTRUCTION.trim() : GESTURE_INSTRUCTION_VOICE_ONLY.trim()}
 ${languageInstruction(language)}
 
 ## Transcription language lock
-Assume the teacher is speaking ${language}. If a phrase is ambiguous, prefer the ${language} interpretation over other languages.
+Assume the teacher is speaking ${language}. If a phrase is ambiguous, prefer the ${language} interpretation over other languages.${language === 'Simplified Chinese' ? '\nAll Chinese text MUST use simplified characters (简体字). Never output traditional Chinese characters.' : ''}
 
 ## CRITICAL: Formatting rule
 You MUST begin every single response with the speaking student's name followed by a colon and space.
@@ -305,7 +311,7 @@ ${video ? GESTURE_INSTRUCTION.trim() : GESTURE_INSTRUCTION_VOICE_ONLY.trim()}
 ${languageInstruction(language)}
 
 ## Transcription language lock
-Assume the teacher is speaking ${language}. If a phrase is ambiguous, prefer the ${language} interpretation over other languages.
+Assume the teacher is speaking ${language}. If a phrase is ambiguous, prefer the ${language} interpretation over other languages.${language === 'Simplified Chinese' ? '\nAll Chinese text MUST use simplified characters (简体字). Never output traditional Chinese characters.' : ''}
 
 ## Starting the session
 Your very first response must be a short spoken greeting (e.g. "Hi, ready when you are"). Do not say you cannot see or hear the teacher—greet them and indicate you're ready to listen.`;
@@ -395,7 +401,7 @@ ${video ? GESTURE_INSTRUCTION.trim() : GESTURE_INSTRUCTION_VOICE_ONLY.trim()}
 ${languageInstruction(language)}
 
 ## Transcription language lock
-Assume the teacher is speaking ${language}. If a phrase is ambiguous, prefer the ${language} interpretation over other languages.
+Assume the teacher is speaking ${language}. If a phrase is ambiguous, prefer the ${language} interpretation over other languages.${language === 'Simplified Chinese' ? '\nAll Chinese text MUST use simplified characters (简体字). Never output traditional Chinese characters.' : ''}
 
 ## Starting
 Your very first response must be a short spoken greeting. Do not say you cannot see or hear the teacher—greet them and indicate you're ready to listen.`;
@@ -477,6 +483,7 @@ async function generateReflection(
   ai: GoogleGenAI,
   topic: string,
   sessionLog: SessionEntry[],
+  language: string = 'English',
 ): Promise<object> {
   if (sessionLog.length < 2) {
     return {
@@ -518,7 +525,10 @@ async function generateReflection(
           `  - "clarity": one of "Excellent", "Good", "Fair", "Needs Work" — how clear and understandable was the teacher\n` +
           `  - "visuals": one of "Excellent", "Good", "Fair", "Needs Work" — how well were visual aids used\n` +
           `  - "pacing": one of "Excellent", "Steady", "Fast", "Slow" — was the pacing appropriate\n` +
-          `  - "tools": one of "Seamless", "Good", "Fair", "Minimal" — how well did the teacher use available tools (whiteboard, screen share, etc.)\n\n` +
+          `  - "tools": one of "Seamless", "Good", "Fair", "Minimal" — how well did the teacher use available tools (whiteboard, screen share, etc.)\n` +
+          `- "uiLabels": object with translated section headers for the reflection page in ${language}. Keys: "title", "summary", "strengths", "gaps", "gapsEmpty", "vocabulary", "nextSteps", "questions", "presentationFeedback", "mechanics", "teachAgain", "changeTopic", "downloadSummary". Values must be the natural ${language} translation of these UI labels: "Session Reflection", "What Went Well", "Concepts to Revisit", "Mastery achieved! You explained every point clearly.", "Key Vocabulary", "Next Steps", "Student Questions", "Presentation Skills Feedback", "Presentation & Mechanics", "Teach Again", "Change topic", "Download Summary".\n\n` +
+          (language !== 'English' ? `IMPORTANT: Write ALL text content (summary, strengths, gaps, topQuestions, improvements, keyVocabulary, presentationSkills values) in ${language}. Only the JSON keys and presentationMechanics rating words (Excellent/Good/Fair/etc.) should remain in English.\n` : '') +
+          (language === 'Simplified Chinese' ? `Use simplified Chinese characters (简体字) exclusively. Never use traditional Chinese characters.\n` : '') +
           `Keep every bullet and presentationSkills value to at most one short sentence. Be explicit and useful. Return ONLY valid JSON. No extra text.`
         }]
       }],
@@ -1095,6 +1105,9 @@ async function main() {
       const speaker = (body?.speaker || 'Speaker').trim() || 'Speaker';
       const context = (body?.context || '').trim().slice(0, 2000);
       if (!text) return c.json({ cleaned: body?.text || '' });
+      const simplifiedChinese = language === 'Simplified Chinese'
+        ? `- You MUST output simplified Chinese characters (简体字) exclusively. Convert any traditional Chinese characters (繁體字) to their simplified equivalents.\n`
+        : '';
       const cleanupPrompt =
         `Raw speech-to-text (may have missing spaces, merged words, or wrong words). Topic: "${topic}". Language: "${language}".\n\n` +
         `Task: produce a single readable transcript that matches what ${speaker} likely said.\n` +
@@ -1102,6 +1115,7 @@ async function main() {
         `- Fix homophones and technical terms using topic context and ${language} spelling conventions.\n` +
         `- Use prior conversation context to disambiguate words, names, and phrasing.\n` +
         `- Keep the same order and meaning; do not summarize or add ideas.\n` +
+        simplifiedChinese +
         (mode === 'live'
           ? `- This is a live partial stream. Make spacing and grammar readable immediately, but preserve unfinished wording.\n`
           : `- This is a final transcript. Use complete punctuation and capitalization.\n`) +
@@ -1713,7 +1727,7 @@ async function main() {
             if (reflectionRequested) return;
             reflectionRequested = true;
 
-            generateReflection(ai, topic, sessionLog).then(data => { sendJson({ type: 'reflection', data }); });
+            generateReflection(ai, topic, sessionLog, language).then(data => { sendJson({ type: 'reflection', data }); });
             return;
           }
           if (parsed.type === 'text_input' && typeof parsed.text === 'string' && parsed.text.trim()) {
@@ -1843,7 +1857,7 @@ async function main() {
             if (reflectionRequested) return;
             reflectionRequested = true;
 
-            generateReflection(ai, topic, sessionLog).then(reflData => { sendJson({ type: 'reflection', data: reflData }); });
+            generateReflection(ai, topic, sessionLog, language).then(reflData => { sendJson({ type: 'reflection', data: reflData }); });
             return;
           }
           if (msg.type === 'text_input' && typeof msg.text === 'string' && msg.text.trim()) {

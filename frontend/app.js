@@ -2109,6 +2109,39 @@ function showReflection(data) {
   sessionScreen.style.display = "none";
   reflectionScreen.style.display = "block";
 
+  // Apply localized labels if provided (non-English sessions)
+  const labels = data.uiLabels || {};
+  if (labels.title) {
+    const titleEl = document.querySelector(".reflection-title");
+    if (titleEl) titleEl.textContent = labels.title;
+  }
+  const labelMap = {
+    reflectionCardStrength: labels.strengths,
+    reflectionCardGap: labels.gaps,
+    reflectionCardVocab: labels.vocabulary,
+    reflectionCardImprovement: labels.nextSteps,
+    reflectionCardQuestions: labels.questions,
+    reflectionCardPresentation: labels.presentationFeedback,
+    reflectionCardMechanics: labels.mechanics,
+  };
+  for (const [cardId, label] of Object.entries(labelMap)) {
+    if (!label) continue;
+    const h3 = document.querySelector(`#${cardId} h3`);
+    if (!h3) continue;
+    const icon = h3.querySelector(".rcard-icon");
+    if (icon) {
+      h3.textContent = "";
+      h3.appendChild(icon);
+      h3.append(" " + label);
+    } else {
+      h3.textContent = label;
+    }
+  }
+  if (labels.teachAgain) teachAgainBtn.innerHTML = `&#x1F393; ${labels.teachAgain}`;
+  if (labels.changeTopic) changeTopicBtn.textContent = labels.changeTopic;
+  const dlBtn = document.getElementById("downloadSummaryBtn");
+  if (labels.downloadSummary && dlBtn) dlBtn.innerHTML = `<span class="reflection-download-icon">&#x1F4E5;</span> ${labels.downloadSummary}`;
+
   reflectionSummary.textContent = data.summary || "";
 
   const recapTopic = document.getElementById("reflectionRecapTopic");
@@ -2141,6 +2174,7 @@ function showReflection(data) {
   const gapsEmpty = document.getElementById("reflectionGapsEmpty");
   if (gapsList && gapsEmpty) {
     gapsList.innerHTML = "";
+    if (labels.gapsEmpty) gapsEmpty.textContent = labels.gapsEmpty;
     if (!data.gaps || data.gaps.length === 0) {
       gapsEmpty.style.display = "block";
     } else {
@@ -2873,85 +2907,6 @@ if (sessionHomeBtn) {
   });
 }
 
-// ── Server logs panel ──────────────────────────────────────────────────────────
-(function () {
-  const logsPanel   = document.getElementById("logsPanel");
-  const logsBody    = document.getElementById("logsBody");
-  const logsCloseBtn = document.getElementById("logsCloseBtn");
-  const logsClearBtn = document.getElementById("logsClearBtn");
-  const toggleLogsBtn = document.getElementById("toggleLogsBtn");
-  if (!logsPanel || !logsBody) return;
-
-  let logsVisible = false;
-  let logsPollTimer = null;
-  let lastLogTs = 0;
-
-  function formatTs(ts) {
-    const d = new Date(ts);
-    return d.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  }
-
-  function addLogLine(entry) {
-    const div = document.createElement("div");
-    div.className = "log-line log-" + (entry.level || "info");
-    const ts = document.createElement("span");
-    ts.className = "log-ts";
-    ts.textContent = formatTs(entry.ts);
-    div.appendChild(ts);
-    div.appendChild(document.createTextNode(entry.msg));
-    logsBody.appendChild(div);
-  }
-
-  async function pollLogs() {
-    try {
-      const res = await fetch("/api/logs?since=" + lastLogTs);
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data.logs && data.logs.length) {
-        const autoScroll = logsBody.scrollHeight - logsBody.scrollTop - logsBody.clientHeight < 50;
-        for (const entry of data.logs) {
-          addLogLine(entry);
-          if (entry.ts > lastLogTs) lastLogTs = entry.ts;
-        }
-        if (autoScroll) logsBody.scrollTop = logsBody.scrollHeight;
-      }
-    } catch (_) {}
-  }
-
-  function startPolling() {
-    if (logsPollTimer) return;
-    pollLogs();
-    logsPollTimer = setInterval(pollLogs, 2000);
-  }
-
-  function stopPolling() {
-    if (logsPollTimer) { clearInterval(logsPollTimer); logsPollTimer = null; }
-  }
-
-  function showLogs() {
-    logsVisible = true;
-    logsPanel.classList.add("visible");
-    if (toggleLogsBtn) toggleLogsBtn.classList.add("active");
-    startPolling();
-  }
-
-  function hideLogs() {
-    logsVisible = false;
-    logsPanel.classList.remove("visible");
-    if (toggleLogsBtn) toggleLogsBtn.classList.remove("active");
-    stopPolling();
-  }
-
-  if (toggleLogsBtn) {
-    toggleLogsBtn.addEventListener("click", () => {
-      if (logsVisible) hideLogs(); else showLogs();
-    });
-  }
-  if (logsCloseBtn) logsCloseBtn.addEventListener("click", hideLogs);
-  if (logsClearBtn) logsClearBtn.addEventListener("click", () => {
-    logsBody.innerHTML = "";
-  });
-})();
 
 // ── Diagram frame streaming + vision refresh ────────────────────────────────
 
