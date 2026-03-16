@@ -1,6 +1,10 @@
 # Dasko
 
-**Learn by teaching.** Dasko is a real-time, voice-and-vision platform where you teach AI students who listen, watch, ask questions, and push back — just like a real classroom. If you can explain it clearly enough for them to understand, you truly know it.
+![Dasko logo](logo.png)
+
+**Learn by teaching.**
+
+Dasko is a real-time, voice-and-vision platform where you teach AI students who listen, watch, ask questions, and push back — just like a real classroom. If you can explain it clearly enough for them to understand, you truly know it.
 
 Built for the **Gemini Live Agent Hackathon** by two MIT students.
 
@@ -86,7 +90,9 @@ Multiple safeguards prevent the AI student from fabricating teacher speech:
 
 ```
 Dasko/
-├── server.ts               # Backend — Hono HTTP + WebSocket proxy to Gemini Live
+├── README.md
+├── logo.png                # Project thumbnail / logo
+├── server.ts               # Node.js backend — Hono HTTP + WebSocket proxy to Gemini Live
 ├── package.json
 ├── Dockerfile              # Docker config for Cloud Run
 ├── cloudbuild.yaml         # CI/CD pipeline
