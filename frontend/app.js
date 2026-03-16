@@ -1814,8 +1814,16 @@ async function startMic(existingStream = null) {
         // Skip interruption during VAD warm-up: mic startup noise/pop can
         // falsely trigger this and kill the initial greeting audio.
         if (Date.now() - micStartedAt > 2000) {
+          // Only suppress future audio if student audio was actively being
+          // received (i.e., this is a real interruption). Without this guard,
+          // suppressAudio stays true for ~2.3s (until speech_end fires) and
+          // eats the beginning of the student's next response — causing the
+          // intermittent "transcript shows but no audio" bug.
+          const wasReceivingStudentAudio = audioChunksReceived > 0;
           interruptPlayback();
-          suppressAudio = true;
+          if (wasReceivingStudentAudio) {
+            suppressAudio = true;
+          }
         }
       }
       vadSilenceCount = 0;
@@ -2432,7 +2440,11 @@ async function connect() {
       }
 
       // Student transcript: new student turn — close any open teacher entry first.
+      // Safety net: if transcript arrives while suppressAudio is stuck on (e.g.,
+      // from a stale speech_start when no student audio was playing), clear it.
+      // Transcript confirms the model is generating a NEW response.
       if (msg.type === "transcript" && msg.text) {
+        if (suppressAudio && !vadInSpeech) suppressAudio = false;
         if (msg.name) activeSpeakerName = STUDENTS[msg.name.toLowerCase()]?.name || msg.name;
         const expectedSpeaker = classroomMode ? (activeSpeakerName || "Student") : "Student";
 
@@ -2542,6 +2554,10 @@ async function connect() {
 
       // Audio (solo)
       if (msg.type === "audio" && msg.base64) {
+        // In solo mode there's no student_speaking message to clear suppressAudio.
+        // If teacher stopped talking (VAD silence) but speech_end hasn't fired yet,
+        // clear suppressAudio so the response audio plays immediately.
+        if (suppressAudio && !vadInSpeech) suppressAudio = false;
         const binary = atob(msg.base64);
         const bytes = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
@@ -2563,6 +2579,7 @@ async function connect() {
 
       // Student diagram
       if (msg.type === "student_diagram" && msg.base64) {
+        console.log(`[Dasko][Diagram] Received student_diagram from ${msg.studentId} (${msg.mimeType || "image/png"}, ${msg.base64.length} chars)`);
         showDiagramThumbnail(msg.studentId, msg.base64, msg.mimeType || "image/png");
       }
 

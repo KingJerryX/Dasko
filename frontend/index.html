@@ -764,6 +764,8 @@
     .orb-wrap {
       position: relative; width: 180px; height: 180px;
       display: flex; align-items: center; justify-content: center;
+      /* Extra margin so ripple rings (scale up to 1.55×) don't overlap text below */
+      margin-bottom: 40px;
     }
     .ring {
       position: absolute; inset: 0; border-radius: 50%;
@@ -943,7 +945,8 @@
     /* ── REFLECTION LOADING ───────────────────────── */
     #reflection-loading-screen {
       display: none; position: fixed; inset: 0; z-index: 200;
-      background: #fff; flex-direction: column; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #f0f4f8 0%, #e8eef5 40%, #f5f0fa 70%, #fef9f4 100%);
+      flex-direction: column; align-items: center; justify-content: center;
       gap: 1.5rem;
     }
     #reflection-loading-screen.visible { display: flex; }
@@ -965,11 +968,11 @@
       font-size: 0.9375rem; color: #6B7280; text-align: center; max-width: 280px;
     }
 
-    /* ── REFLECTION (Redesigned) ────────────────────── */
+    /* ── REFLECTION (Glassmorphism) ─────────────────── */
     #reflection-screen {
       display: none; width: 100%; min-height: 100vh;
       padding: 3rem 1.5rem; transition: opacity 0.3s ease-in-out;
-      background: #fcfcfc;
+      background: linear-gradient(135deg, #f0f4f8 0%, #e8eef5 40%, #f5f0fa 70%, #fef9f4 100%);
     }
     #reflection-screen.show { display: block; }
     .reflection-inner { max-width: 68rem; margin: 0 auto; }
@@ -981,11 +984,15 @@
       color: #64748b; font-size: 1.1rem; line-height: 1.7; font-weight: 400;
       margin-bottom: 2.5rem; max-width: 48rem;
     }
-    /* Topic card */
+    /* Topic card — frosted teal glass */
     .reflection-topic-card {
       display: flex; align-items: center; justify-content: space-between;
-      background: #e0f2f1; border-radius: 1rem; padding: 2rem 2.5rem;
-      border: 1px solid #b2dfdb; margin-bottom: 2.5rem; gap: 1.5rem; flex-wrap: wrap;
+      background: rgba(224, 242, 241, 0.4);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      border-radius: 1rem; padding: 2rem 2.5rem;
+      border: 1px solid rgba(178, 223, 219, 0.5);
+      box-shadow: 0 2px 16px rgba(0, 0, 0, 0.03), inset 0 1px 0 rgba(255,255,255,0.5);
+      margin-bottom: 2.5rem; gap: 1.5rem; flex-wrap: wrap;
     }
     .reflection-topic-label {
       font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
@@ -996,7 +1003,9 @@
     .reflection-download-btn {
       display: flex; align-items: center; gap: 0.5rem;
       padding: 0.7rem 1.5rem; border-radius: 0.75rem;
-      background: #fff; border: 1px solid #b2dfdb; color: #00796b;
+      background: rgba(255, 255, 255, 0.55);
+      backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      border: 1px solid rgba(178, 223, 219, 0.5); color: #00796b;
       font-family: inherit; font-size: 0.875rem; font-weight: 600;
       cursor: pointer; transition: all 0.2s; white-space: nowrap;
     }
@@ -1011,13 +1020,19 @@
       .reflection-bento .bento-row1, .reflection-bento .bento-full { grid-column: span 1; }
       .reflection-topic-card { flex-direction: column; align-items: flex-start; }
     }
-    /* Cards */
+    /* Cards — frosted glass */
     .reflection-card {
       padding: 1.5rem; border-radius: 1rem;
-      border: 1px solid #e2e8f0; background: #fff;
-      transition: box-shadow 0.2s;
+      background: rgba(255, 255, 255, 0.5);
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.6);
+      box-shadow: 0 2px 16px rgba(0, 0, 0, 0.03), inset 0 1px 0 rgba(255,255,255,0.6);
+      transition: box-shadow 0.25s, transform 0.25s;
     }
-    .reflection-card:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.04); }
+    .reflection-card:hover {
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255,255,255,0.7);
+      transform: translateY(-1px);
+    }
     .reflection-card h3 {
       font-size: 1.15rem; font-weight: 700; color: #0f172a;
       margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;
@@ -1029,76 +1044,90 @@
     .rcard-items { display: flex; flex-direction: column; gap: 0.5rem; }
     .rcard-item {
       display: flex; align-items: center; gap: 0.75rem;
-      padding: 0.85rem 1rem; border-radius: 0.75rem; border: 1px solid #e2e8f0;
+      padding: 0.85rem 1rem; border-radius: 0.75rem;
+      border: 1px solid rgba(255, 255, 255, 0.4);
       font-size: 0.9375rem; font-weight: 600; color: #334155;
     }
     .rcard-item-icon { font-size: 1rem; flex-shrink: 0; }
-    .card-strength .rcard-item { background: rgba(224,242,241,0.5); }
+    .card-strength .rcard-item { background: rgba(224,242,241,0.35); }
     .card-strength .rcard-item-icon { color: #0d9488; }
     .card-strength .reflection-highlight { font-weight: 700; color: #0d9488; }
-    .card-gap .rcard-item { background: rgba(252,231,243,0.4); }
+    .card-gap .rcard-item { background: rgba(252,231,243,0.3); }
     .card-gap .rcard-item-icon { color: #f472b6; }
     .card-gap .reflection-highlight { font-weight: 700; color: #e11d48; }
     /* Vocabulary tags */
-    .card-vocab { background: #fff; }
     .rcard-vocab-tags { display: flex; flex-wrap: wrap; gap: 0.5rem; }
     .rcard-vocab-tag {
-      padding: 0.5rem 1rem; background: #f3e5f5; color: #7b1fa2;
-      border: 1px solid #e1bee7; border-radius: 999px; font-size: 0.8125rem; font-weight: 700;
+      padding: 0.5rem 1rem; background: rgba(224, 242, 241, 0.25); color: #0d9488;
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      border: 1px solid rgba(13, 148, 136, 0.2); border-radius: 999px;
+      font-size: 0.8125rem; font-weight: 700;
     }
     /* Next steps */
-    .card-improvement { background: #fff; }
     .rcard-next-steps { list-style: disc; padding-left: 1.25rem; margin: 0; }
     .rcard-next-steps li {
       font-size: 0.9375rem; font-weight: 500; color: #334155;
       padding: 0.35rem 0; line-height: 1.6;
     }
-    .card-improvement .reflection-highlight { font-weight: 700; color: #4338ca; }
+    .card-improvement .reflection-highlight { font-weight: 700; color: #0d9488; }
     /* Questions */
-    .card-questions { background: #fff; }
     .rcard-questions-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
     @media (max-width: 600px) { .rcard-questions-grid { grid-template-columns: 1fr; } }
     .rcard-question {
-      padding: 1rem 1.25rem; background: rgba(255,243,224,0.5);
+      padding: 1rem 1.25rem; background: rgba(255,243,224,0.35);
       border-radius: 0.75rem; border-left: 4px solid #ffcc80;
       font-size: 0.9375rem; font-weight: 500; font-style: italic; color: #334155;
     }
     /* Presentation feedback */
-    .card-presentation { background: #fff; }
     .rcard-feedback-box {
-      padding: 1.25rem 1.5rem; background: rgba(224,242,241,0.35);
-      border-radius: 0.75rem; border: 1px solid #e2e8f0;
+      padding: 1.25rem 1.5rem; background: rgba(224,242,241,0.25);
+      border-radius: 0.75rem; border: 1px solid rgba(255, 255, 255, 0.4);
     }
     .rcard-feedback-box .reflection-skill-text {
       font-size: 0.9375rem; color: #334155; line-height: 1.7;
     }
     /* Mechanics grid */
-    .card-mechanics { background: #fff; }
     .rcard-mechanics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; }
     @media (max-width: 600px) { .rcard-mechanics-grid { grid-template-columns: repeat(2, 1fr); } }
     .rcard-mechanic {
       display: flex; flex-direction: column; align-items: center;
-      padding: 1.25rem 0.75rem; background: rgba(243,229,245,0.3);
-      border-radius: 0.75rem; border: 1px solid #e2e8f0; text-align: center;
+      padding: 1.25rem 0.75rem; background: rgba(224, 242, 241, 0.15);
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      border-radius: 0.75rem; border: 1px solid rgba(13, 148, 136, 0.15); text-align: center;
     }
-    .rcard-mechanic-icon { font-size: 1.5rem; margin-bottom: 0.4rem; color: #b39cd0; }
+    .rcard-mechanic-icon { font-size: 1.5rem; margin-bottom: 0.4rem; color: rgba(13, 148, 136, 0.55); }
     .rcard-mechanic-label { font-size: 0.8125rem; font-weight: 800; color: #0f172a; }
     .rcard-mechanic-value { font-size: 0.75rem; font-weight: 700; color: #64748b; }
     .reflection-empty-msg { font-size: 0.95rem; color: #94a3b8; font-style: italic; padding: 0.5rem 0; }
-    /* Actions */
+    /* Actions — glass buttons */
     .reflection-actions { display: flex; gap: 0.75rem; justify-content: center; margin-top: 3rem; flex-wrap: wrap; }
     .reflection-btn {
-      padding: 1rem 2.5rem; border: 1px solid #e2e8f0; border-radius: 0.75rem;
-      background: #fff; font-family: inherit; font-size: 1.05rem; font-weight: 500;
-      color: #334155; cursor: pointer; transition: all 0.2s;
+      padding: 1rem 2.5rem; border-radius: 0.75rem;
+      background: rgba(255, 255, 255, 0.55);
+      backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.5);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03), inset 0 1px 0 rgba(255,255,255,0.5);
+      font-family: inherit; font-size: 1.05rem; font-weight: 500;
+      color: #334155; cursor: pointer; transition: all 0.25s;
     }
-    .reflection-btn:hover { background: #f8fafc; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .reflection-btn:hover {
+      background: rgba(255, 255, 255, 0.7);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255,255,255,0.6);
+      transform: translateY(-1px);
+    }
     .reflection-btn.primary {
-      background: #b39cd0; color: #fff; border-color: #b39cd0;
+      background: rgba(255, 115, 85, 0.35);
+      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      color: #c2410c; border: 1px solid rgba(255, 115, 85, 0.3);
       font-weight: 800; font-size: 1.15rem; padding: 1rem 3rem;
-      box-shadow: 0 4px 16px rgba(179,156,208,0.3); display: flex; align-items: center; gap: 0.5rem;
+      box-shadow: 0 4px 20px rgba(255, 115, 85, 0.12), inset 0 1px 0 rgba(255,255,255,0.4);
+      display: flex; align-items: center; gap: 0.5rem;
     }
-    .reflection-btn.primary:hover { opacity: 0.92; box-shadow: 0 6px 20px rgba(179,156,208,0.4); }
+    .reflection-btn.primary:hover {
+      background: rgba(255, 115, 85, 0.5);
+      box-shadow: 0 6px 24px rgba(255, 115, 85, 0.2), inset 0 1px 0 rgba(255,255,255,0.5);
+      transform: translateY(-1px);
+    }
 
     /* ── Responsive ──────────────────────────────── */
     @media (max-width: 1100px) {

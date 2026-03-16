@@ -597,7 +597,11 @@ async function generateStudentDiagram(
   onDemand: boolean = false,
 ): Promise<{ base64: string; mimeType: string; hasMistake: boolean } | null> {
   const wordCount = studentText.trim().split(/\s+/).length;
-  if (!onDemand && wordCount < 15) return null;
+  console.log(`[Dasko][DiagramGen] generateStudentDiagram | student=${studentName} | onDemand=${onDemand} | words=${wordCount}`);
+  if (!onDemand && wordCount < 15) {
+    console.log(`[Dasko][DiagramGen] Skipped: word count ${wordCount} < 15 and not on-demand`);
+    return null;
+  }
 
   const hasMistake = onDemand ? false : Math.random() < 0.25;
 
@@ -672,7 +676,13 @@ const DIAGRAM_REQUEST_PATTERNS = [
 ];
 
 function isDiagramRequest(text: string): boolean {
-  return DIAGRAM_REQUEST_PATTERNS.some(p => p.test(text));
+  const matched = DIAGRAM_REQUEST_PATTERNS.some(p => p.test(text));
+  console.log(`[Dasko][DiagramDetect] isDiagramRequest("${text.slice(0, 120)}") → ${matched}`);
+  if (matched) {
+    const pattern = DIAGRAM_REQUEST_PATTERNS.find(p => p.test(text));
+    console.log(`[Dasko][DiagramDetect] Matched pattern: ${pattern}`);
+  }
+  return matched;
 }
 
 // ── Vision refresh detection ────────────────────────────────────────────────
@@ -691,18 +701,31 @@ function triggerOnDemandDiagram(
   socket: WebSocket,
   sendJson: (data: object) => void,
 ) {
+  console.log(`[Dasko][DiagramGen] triggerOnDemandDiagram called | student=${studentName} | topic="${topic}" | text="${teacherText.slice(0, 100)}"`);
+
   // Tell the student to acknowledge the request verbally
   try {
     liveSession.sendRealtimeInput({
       text: `[The teacher asked you to draw a diagram. Say something like "Sure, let me sketch that out!" or "Okay, give me a sec to draw this." Keep it short and natural. A diagram image will appear for the teacher automatically — do NOT describe what you're drawing.]`,
     });
-  } catch (_) {}
+    console.log(`[Dasko][DiagramGen] Sent acknowledgment prompt to ${studentName}'s Live session`);
+  } catch (e: any) {
+    console.error(`[Dasko][DiagramGen] Failed to send acknowledgment to ${studentName}:`, e.message ?? e);
+  }
 
   // Fire-and-forget diagram generation (on-demand = true to bypass word count check)
+  console.log(`[Dasko][DiagramGen] Starting image generation with model=${IMAGE_MODEL}...`);
   generateStudentDiagram(ai, topic, teacherText, studentName, true).then(result => {
-    if (!result || socket.readyState !== WebSocket.OPEN) return;
+    if (!result) {
+      console.warn(`[Dasko][DiagramGen] generateStudentDiagram returned null for ${studentName}`);
+      return;
+    }
+    if (socket.readyState !== WebSocket.OPEN) {
+      console.warn(`[Dasko][DiagramGen] Socket closed before diagram could be sent for ${studentName}`);
+      return;
+    }
     sendJson({ type: 'student_diagram', studentId: studentName === 'Student' ? 'solo' : studentName, base64: result.base64, mimeType: result.mimeType });
-    console.log(`[Dasko] On-demand diagram generated for ${studentName}`);
+    console.log(`[Dasko][DiagramGen] On-demand diagram generated & sent for ${studentName} (${result.mimeType}, ${result.base64.length} chars, mistake=${result.hasMistake})`);
 
     // Send the diagram image to the Live session so the student can "see" its own diagram
     try {
@@ -1135,6 +1158,7 @@ async function main() {
       teacherTranscriptBuf = '';
 
       if (!text) return;
+      console.log(`[Dasko][SpeechEnd] Teacher said: "${text.slice(0, 200)}"`);
 
       sessionLog.push({ role: 'teacher', name: 'Teacher', text, time: Date.now() });
 
