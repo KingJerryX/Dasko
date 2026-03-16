@@ -1,124 +1,201 @@
 # Dasko
 
-**Learn by teaching.** Dasko turns the best way to reinforce understanding—teaching someone else—into a live, voice-and-vision experience. You're the teacher. AI students are your audience. They ask the questions real students would ask. Your job is to explain clearly and correctly.
+**Learn by teaching.** Dasko is a real-time, voice-and-vision platform where you teach AI students who listen, watch, ask questions, and push back — just like a real classroom. If you can explain it clearly enough for them to understand, you truly know it.
 
-Built for the **Gemini Live Agent Challenge**: real-time, multimodal, interruptible agents using the Gemini Live API, hosted on Google Cloud.
-
----
-
-## The idea
-
-Learning stacks today cover:
-
-| Level | What it is | Examples |
-|-------|------------|----------|
-| **Memorization** | Flashcards, recall | Quizlet, Anki |
-| **Practice** | Exercises, drills | IXL, Khan Academy |
-| **Reinforcement** | Teaching others | ❌ *missing* |
-
-The strongest signal that you understand something is being able to **teach it**. Dasko fills that gap:
-
-1. **You pick a topic** (e.g. photosynthesis, quadratic equations, supply and demand).
-2. **You teach** — out loud, and optionally share your screen or whiteboard.
-3. **AI “students”** listen and watch. They ask questions a real student would ask: “Why does that happen?” “Can you give an example?” “What if…?”
-4. **You answer.** Explaining to them reinforces your own understanding; gaps show up when you can’t explain well.
-
-The agent uses **audio** (your voice) and **vision** (optional: screen/webcam) so the “students” can refer to what you’re showing, not just what you say.
+Built for the **Gemini Live Agent Hackathon** by two MIT students.
 
 ---
 
-## How it fits the Gemini Live challenge
+## The Problem
 
-- **Real-time interaction with audio and vision** — You speak; the agent responds with voice. Optional video so the agent “sees” your board/screen.
-- **Natural conversation, interruptible** — Barge-in supported; you can cut in when the student is talking.
-- **Mandatory tech** — Gemini Live API (or ADK); agents suitable for hosting on Google Cloud.
-- **Beyond text-in, text-out** — Multimodal: voice in, voice out, plus optional video in.
-- **Category** — Vision-enabled, customized “tutor” flipped: the human is the tutor, the agent is the curious student.
+Learning has three levels:
 
----
+| Level | What it is | Existing Tools |
+|-------|------------|----------------|
+| **Memorize** | Flashcards, recall | Quizlet, Anki |
+| **Practice** | Exercises, drills | Khan Academy, IXL |
+| **Teach** | Explain to others | **Nothing — until Dasko** |
 
-## Tech stack
-
-- **Backend**: Node.js + TypeScript (Hono + `ws`) — WebSocket proxy to Gemini Live API, per-client sessions, topic handling.
-- **Frontend**: Vanilla JS web app — mic capture, audio playback, topic selection, transcript display.
-- **Model**: `gemini-2.5-flash-native-audio-latest` via Google AI Studio API key.
-- **Hosting**: Google Cloud (Cloud Run).
+The protégé effect is real: students who teach material score 28% higher on later recall. Dasko gives you a student to teach — anytime, anywhere.
 
 ---
 
-## Project structure
+## Features
+
+### Real-Time Bidirectional Audio
+Speak naturally. The AI student responds with voice instantly. No turn-taking, no buttons — a live conversation powered by Gemini Live API.
+
+### Multimodal Vision
+The AI student sees what you see:
+- **Camera** — hold up fingers, show objects, gesture naturally
+- **Screen share** — reference slides, diagrams, articles
+- **Whiteboard** — draw and explain concepts visually
+- All sources composited and sent as frames at full resolution (1280×720)
+
+### Natural Barge-In
+Interrupt the student mid-sentence — they stop and listen, just like a real student. True real-time interruptibility, not turn-based.
+
+### Classroom Mode
+Teach 2–4 AI students simultaneously. Each has a unique personality and voice. They ask different questions, build on each other's ideas, and sometimes disagree. Practice managing a live discussion.
+
+### On-Demand Diagram Generation
+Ask the student to "draw a diagram" and they sketch a whiteboard-style doodle. Open it in a popup, annotate it, and the student sees your annotations in real-time.
+
+### Multilingual Support
+Switch languages mid-session. Teach in English, then say "vamos a hablar en español" or "现在我们用中文" — the student follows seamlessly.
+
+### Study Materials Upload
+Drag-and-drop PDFs, PowerPoint files, images, or videos. Paste notes from NotebookLM or anywhere. The AI student has full context before the session starts.
+
+### Session Reflection
+After each session, receive a detailed breakdown:
+- What went well / Concepts to revisit
+- Key vocabulary extracted
+- Student questions that were asked
+- Presentation & mechanics scores (Clarity, Visuals, Pacing, Tools)
+- Downloadable PDF summary
+
+### AI Coaching Tips
+Real-time coaching suggestions appear during your session — helping you improve your teaching technique as you go.
+
+### Anti-Hallucination System
+Multiple safeguards prevent the AI student from fabricating teacher speech:
+- Voice Activity Detection (VAD) gating
+- `teacherHasSpoken` flag
+- Audio blackout window on session start
+- Strengthened system prompts
+
+---
+
+## Tech Stack
+
+| Component | Technology |
+|-----------|-----------|
+| **Backend** | Node.js + TypeScript + Hono + WebSocket |
+| **Frontend** | Vanilla JS + Web Audio API + Canvas |
+| **Real-time Audio + Vision** | Gemini Live API (`gemini-2.5-flash-native-audio-latest`) |
+| **Diagram Generation** | Gemini Image Gen (`gemini-2.5-flash-image`) |
+| **Coaching + Reflection** | Gemini Flash (`gemini-2.5-flash`) + Gemini Pro (`gemini-2.5-pro`) |
+| **Hosting** | Google Cloud Run (Docker, session affinity, auto-scale) |
+| **CI/CD** | Google Cloud Build (`cloudbuild.yaml`) |
+| **Secrets** | Google Secret Manager |
+
+---
+
+## Project Structure
 
 ```
 Dasko/
-├── README.md
-├── server.ts               # Node.js backend — Hono HTTP + WebSocket proxy to Gemini Live
+├── server.ts               # Backend — Hono HTTP + WebSocket proxy to Gemini Live
 ├── package.json
+├── Dockerfile              # Docker config for Cloud Run
+├── cloudbuild.yaml         # CI/CD pipeline
 ├── .env.example            # Copy to .env and add your API key
 ├── frontend/
-│   ├── index.html          # Teacher UI: topic picker, mic controls, transcript
-│   └── app.js              # Mic capture, PCM streaming, audio playback
-└── docs/
+│   ├── index.html          # Teacher UI
+│   └── app.js              # Mic/camera/canvas/audio playback/VAD
+└── server/
+    └── (server modules)
 ```
 
 ---
 
-## Roadmap
+## Running Locally
 
-1. **Phase 1 — Minimum viable** ✅
-   - [x] Node.js WebSocket proxy to Gemini Live with student system instruction
-   - [x] Frontend: always-on mic, play student audio, topic selection
-   - [x] User chooses a topic; system instruction scopes the student to that topic
-   - [x] Student greets first, then listens and asks questions
+### Prerequisites
+- Node.js 20+
+- A Gemini API key from [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)
 
-2. **Phase 2 — Vision**
-   - [ ] Send video (1 FPS JPEG) from frontend so the student can reference the screen
-   - [ ] Optional webcam or screen share
+### Steps
 
-3. **Phase 3 — Polish & challenge**
-   - [ ] Session history / transcript export
-   - [ ] Deploy on Google Cloud per challenge rules → see **[docs/DEPLOY_GOOGLE_CLOUD.md](docs/DEPLOY_GOOGLE_CLOUD.md)**
-   - [ ] Demo script and submission
+1. Clone the repo:
+   ```bash
+   git clone https://github.com/hossenaima/Dasko.git
+   cd Dasko
+   ```
 
----
-
-## Running locally
-
-1. Copy `.env.example` to `.env` and add your API key:
+2. Create your `.env` file:
    ```bash
    cp .env.example .env
    ```
-   Get one at [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey).
+   Open `.env` and add your Gemini API key:
+   ```
+   GEMINI_API_KEY=your-api-key-here
+   ```
 
-2. Install and run:
+3. Install dependencies:
    ```bash
    npm install
+   ```
+
+4. Start the dev server:
+   ```bash
    npm run dev
    ```
 
-3. Open [http://localhost:8000](http://localhost:8000), pick a topic, and click **Start teaching**.
+5. Open [http://localhost:8000](http://localhost:8000) in Chrome or Edge (required for Web Audio API).
+
+6. Pick a topic, enable your camera/whiteboard, and click **Start Teaching**.
 
 ---
 
-## How it works
+## Deploying to Google Cloud Run
 
-- Browser captures mic audio as 16-bit PCM at 16 kHz and streams it as binary WebSocket frames to the server.
-- Server forwards audio to the Gemini Live API via `sendRealtimeInput`. The API handles VAD (voice activity detection) — no push-to-talk needed.
-- On connect, the server triggers the student’s greeting via `sendRealtimeInput({ text: “...” })` (same mode as mic audio — mixing `sendClientContent` and `sendRealtimeInput` in one session causes issues).
-- Student audio responses stream back as base64 PCM at 24 kHz and are played in the browser via the Web Audio API.
-- **Study materials** — **Drag-and-drop** PDF, PPTX, text, or images; text is extracted into the box (see **[docs/STUDY_MATERIALS.md](docs/STUDY_MATERIALS.md)**). Or paste from NotebookLM / anywhere.
-- **Transcript** — **Web Speech API** in Chrome/Edge drives the teacher line when available; otherwise Live ASR + **Pro-model cleanup** after each turn.
+### Prerequisites
+- Google Cloud account with billing enabled
+- `gcloud` CLI installed and authenticated
+- API key stored in Secret Manager as `gemini-api-key`
+
+### Deploy
+
+```bash
+gcloud builds submit --config cloudbuild.yaml
+```
+
+This builds the Docker image, pushes it to Container Registry, and deploys to Cloud Run with session affinity and WebSocket support.
+
+### Manual Deploy (Alternative)
+
+```bash
+gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/dasko
+gcloud run deploy dasko \
+  --image gcr.io/YOUR_PROJECT_ID/dasko \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --min-instances=0 \
+  --max-instances=3 \
+  --memory=512Mi \
+  --timeout=900 \
+  --session-affinity \
+  --set-secrets=GEMINI_API_KEY=gemini-api-key:latest
+```
+
+---
+
+## How It Works
+
+1. **Browser** captures mic audio as 16-bit PCM at 16 kHz and streams it over WebSocket.
+2. **Server** forwards audio to Gemini Live API sessions. In classroom mode, audio goes to all student sessions simultaneously.
+3. **Camera/screen/whiteboard** frames are composited into a single 1280×720 JPEG and sent to Gemini Live for vision understanding.
+4. **Gemini Live API** processes audio + vision, generates student responses as audio + transcription, and streams them back.
+5. **VAD** on the frontend detects speech start/end, enabling barge-in interruption — the student stops speaking when you cut in.
+6. **Diagram requests** are detected via keyword matching in teacher speech and routed to Gemini Image Gen for on-demand sketch generation.
+7. **Post-session**, the full transcript is cleaned and analyzed by Gemini Flash + Pro to produce a detailed teaching reflection.
 
 ---
 
 ## Troubleshooting
 
-- **Model never replies / session closes immediately** — Check the terminal for the close code. Code `1008` means the model name is wrong or not available for your API key. The correct model is `gemini-2.5-flash-native-audio-latest`.
-- **Student audio not playing** — Ensure the browser tab is not muted. Check the browser console (F12) for Web Audio errors. The playback AudioContext is created on the “Start teaching” click to satisfy browser autoplay policy.
-- **Mic toggles on/off** — Never mix `sendClientContent` and `sendRealtimeInput` in the same session. Use `sendRealtimeInput({ text: “...” })` for any text triggers in audio sessions.
-- **Port 8000 already in use** — `npm run dev` handles this automatically. If it still fails, run `lsof -ti:8000 | xargs kill -9` manually.
+| Issue | Fix |
+|-------|-----|
+| Student never responds | Check terminal for Live API close code. Code `1008` = wrong model or invalid API key. |
+| No audio playback | Ensure browser tab isn't muted. Check console (F12) for Web Audio errors. |
+| Camera not working | Grant camera permission in browser. Chrome/Edge required. |
+| Diagram not generating | Check terminal logs for `[DiagramGen]` messages. Model may be rate-limited. |
+| Cloud Run disconnects immediately | Ensure `--session-affinity` and `--timeout=900` are set. Check that container binds to `0.0.0.0`. |
 
 ---
 
 ## License
 
-TBD (hackathon submission).
+MIT
